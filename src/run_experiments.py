@@ -23,127 +23,8 @@ from sklearn.preprocessing import StandardScaler
 
 from xgboost import XGBRegressor
 
-def plot_confidence_intervals(y, y_pred, y_pred_ci) :
-    """
-    
-    """
-    # sort y_test values from small to big, along with y_pred_ci
-    # using a list is pretty slow, there is probably a smarter way to do this
-    # with numpy arrays, but the data set sizes should be small, so who cares
-    y_and_ci = []
-    for i in range(0, len(y)) :
-        y_and_ci.append([y[i], y_pred[i], y_pred_ci[i]])
-    y_and_ci = sorted(y_and_ci, key=lambda x : x[0])
-    
-    fig, ax = plt.subplots(figsize=(10,8))
-    
-    # plot measured values and point predictions for y
-    x = range(0, len(y))
-    ax.scatter(x, [x[0] for x in y_and_ci], marker='o', color='green', label="Measured values")
-    ax.scatter(x, [x[1] for x in y_and_ci], marker='x', color='orange', label="Predictions")
-    
-    # visualize corresponding confidence intervals around point predictions
-    ax.fill_between(x, [x[2][0] for x in y_and_ci], [x[2][1] for x in y_and_ci], color='orange', alpha=0.3)
-    
-    ax.set_xlabel("Samples sorted by increasing value of target")
-    ax.set_xlabel("Value of target y")
-    ax.legend(loc='best')
-    
-    return fig, ax
-
-def plot_pareto(methods, results_dictionary, translations=None, all_results=False) :
-        
-    fig, ax = plt.subplots(figsize=(10,8))
-    
-    for method in methods :
-        
-        # get the information related to coverage
-        key_coverage = method + "_coverage"
-        x = results_dictionary[key_coverage]
-        
-        # get information on median (or mean)
-        key_median = method + "_median"
-        y = results_dictionary[key_median]
-        
-        if all_results == False :
-            x = x[-1]
-            y = y[-1]
-        
-        if translations is not None :
-            method = translations[method]
-            
-        ax.scatter(x, y, label=method)
-    
-    # invert x-axis, so that the plot is more readable
-    ax.invert_xaxis()
-    
-    ax.set_xlabel("coverage on the test set")
-    ax.set_ylabel("median amplitude of the confidence intervals")
-    ax.legend(loc='best')
-    
-    return fig, ax
-
-def load_and_preprocess_openml_task(task_id) :
-    """
-    Given a task_id, load and pre-process the data related to the task. Pre-processing
-    includes converting categorical values to numerical values (e.g. integers),
-    and treating missing data, either with imputation or just by ignoring the 
-    missing values.
-
-    Parameters
-    ----------
-    task_id : int
-        Id for the target task.
-
-    Returns
-    -------
-    df_X : pd.DataFrame
-        Feature values for the task.
-    df_y : pd.DataFrame
-        Target values for the task.
-    task : openml Task
-        Task object, contains a lot of useful information.
-
-    """
-    task = openml.tasks.get_task(task_id, download_splits=True)
-    
-    # the 'task' object above contains a lot of useful information,
-    # like the name of the target variable and the id of the dataset
-    df_X, df_y = task.get_X_and_y('dataframe')
-    
-    # check for missing data; if data is missing, operate accordingly
-    missing_data = df_X.isnull().sum().sum() + df_y.isnull().sum()
-    
-    # TODO there should be better ways of taking into account missing data, but for
-    # these data sets, all we do is a few special cases where we drop columns
-    # that are missing too many data points
-    if missing_data > 0 :
-        if task_id == 361268 or task_id == 361616 :
-            # these two task have several columns with A LOT of missing data,
-            # so we are just going to drop them
-            df_X.dropna(axis=1, inplace=True)
-        else :
-            # default solution is dropping rows
-            print("Found missing data in data set!")
-            df_X.dropna(axis=0, inplace=True)
-    
-    # check if there are any categorical columns
-    df_categorical = df_X.select_dtypes(include=['category', 'object'])
-    
-    # replace categorical values with integers
-    for c in df_categorical.columns :
-        df_X[c] = df_X[c].astype('category') # double-check that it is treated as a categorical column
-        df_X[c] = df_X[c].cat.codes # replace values with category codes (automatically computed)
-       
-    return df_X, df_y, task
-
-def evaluate_confidence_intervals(y_true, y_pred, y_ci) :
-    """
-    Get an evaluation for the confidence intervals. Things that matter:
-        - is the true value within the range y_pred +/- y_ci?
-        - how large are the ci?
-    """
-    return
+# local library
+from common import load_and_preprocess_openml_task, plot_confidence_intervals, plot_pareto, translations
 
 if __name__ == "__main__" :
     
@@ -167,17 +48,6 @@ if __name__ == "__main__" :
                       361257, 361268, 361617]
     tasks_too_bad = [361243, 361244, 361261, 361618, 361619]
     
-    # this is used to translate internal naming convention to readable strings
-    # for the plots
-    translations = {
-        "conformal_predictor" : "Classic conformal predictor (CP)",
-        "normalized_cp_knn_dist" : "CP with intervals normalized using KNN on distance",
-        "normalized_cp_knn_std" : "CP with intervals normalized using KNN on standard deviation",
-        "normalized_cp_knn_res" : "CP with intervals normalized using KNN on OOB residuals",
-        "normalized_cp_norm_var" : "CP with intervals normalized using variance of ensemble predictors",
-        "mondrian_cp" : "Mondrian CP",
-        }
-    
     
     # filtering warnings is usually bad, but here I am getting lots of annoying
     # FutureWarnings on stuff I cannot modify (it's inside other functions), so
@@ -199,7 +69,7 @@ if __name__ == "__main__" :
     
     # create data structures to store the results
     results_dictionary = {
-        'task_id' : [], 'dataset_name' : [], 'r2' : [], 
+        'task_id' : [], 'dataset_name' : [], 'r2' : [], 'mondrian_bins' : [], 
                           }
     
     # prepare directory for the results
@@ -339,16 +209,42 @@ if __name__ == "__main__" :
         # so, in the end we ARE switching back to Random Forest
         if learner_prop.__class__.__name__ == "RandomForestRegressor" :
             print("Now calibrating a Mondrian regressor...")
-            bins_cal, bin_thresholds = binning(sigmas_cal_var, bins=20) # why 20 and not 200? magic number
-            regressor_mond = WrapRegressor(learner_prop)
-            regressor_mond.calibrate(X_cal, y_cal, bins=bins_cal)
             
-            bins_test = binning(sigmas_test_var, bins=bin_thresholds)
-            intervals_mond = regressor_mond.predict_int(X_test, bins=bins_test)
+            # here we might need to perform a few iterations; basically Mondrian
+            # conformal predictors only work if there are enough values to bin;
+            # but "enough values" is dependent on the number of bins, so we can
+            # iterate until either the number of bins goes to 1, or until the 
+            # size of the confidence intervals is not infinite
+            number_of_bins = 20
+            keep_iterating = True
+            
+            while keep_iterating and number_of_bins > 1 :
+                bins_cal, bin_thresholds = binning(sigmas_cal_var, bins=number_of_bins)
+                regressor_mond = WrapRegressor(learner_prop)
+                regressor_mond.calibrate(X_cal, y_cal, bins=bins_cal)
+                
+                bins_test = binning(sigmas_test_var, bins=bin_thresholds)
+                intervals_mond = regressor_mond.predict_int(X_test, bins=bins_test)
+                
+                # check: if the confidence intervals do not contain any '-inf', '+inf'
+                # we stop; otherwise, reduce number of bins and iterate
+                if np.isfinite(intervals_mond).any() :
+                    keep_iterating = False
+                    print("Found non-infinite confidence intervals for Mondrian conformal predictors for %d bins, stopping" %
+                          number_of_bins)
+                else :
+                    print("Found infinite confidence intervals for Mondrian conformal predictor at %d bins, iterating..."
+                          % number_of_bins)
+                    number_of_bins -= 1
             
             task_results["mondrian_cp"] = intervals_mond
+            results_dictionary["mondrian_bins"].append(number_of_bins)
             
         # TODO: symbolic regression intervals, using all sigmas
+        
+        # step 1: prepare data set with all sigmas and stuff on calibration set
+        # one feature per type of sigma; we 
+        
         
         # post-processing of the results for the different confidence intervals
         # statistics we are interested in: coverage, mean size, median size
@@ -410,5 +306,8 @@ if __name__ == "__main__" :
     fig, ax = plot_pareto([k for k in task_results], results_dictionary, translations=translations, all_results=True)
     ax.set_title("Performance of conformal prediction methods on selected CTR-23 datasets")
     plt.savefig(os.path.join(results_folder, "pareto.png"), dpi=300)        
-
+    
+    # TODO more informative: how many times a conformal predictor is Pareto-optimal?
+    # it has to be done data set by data set, and maybe I could write a specific
+    # post-processing script
     
