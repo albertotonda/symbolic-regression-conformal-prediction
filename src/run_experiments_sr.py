@@ -56,7 +56,7 @@ function my_custom_objective(tree, dataset::Dataset{T,L}, options) where {T,L}
         
         fitness_amplitude += y_pred^2
         
-        if (i == 1)
+        if (i == 1 && false)
             println("y_true=", y_true)
             println("y_pred=", y_pred)
             println("upper_bound=", upper_bound)
@@ -67,11 +67,46 @@ function my_custom_objective(tree, dataset::Dataset{T,L}, options) where {T,L}
         
     end
     
-    return fitness_coverage * 1000 + fitness_amplitude
+    fitness_value = fitness_coverage * 1000 + fitness_amplitude
+    #println("fitness_value=", fitness_value)
+    
+    return fitness_value
     
 end
 """
 
+loss_function_julia_penalize_smaller = """
+function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
+    prediction, flag = eval_tree_array(tree, dataset.X, options)
+    if !flag
+        return L(Inf)
+    end
+    
+    result = 0.0
+    for i in 1:length(dataset.y)
+        if (prediction[i] < dataset.y[i])
+            result += 10 * (prediction[i] - dataset.y[i])^2
+        else
+            result += (prediction[i] - dataset.y[i])^2
+        end
+    end
+    
+    return result / dataset.n
+end
+"""
+
+def get_confidence_intervals_from_predictors(X, y_pred, predictor_ci) :
+    """
+    Get confidence intervals from the trained predictor.
+    """
+    ci = np.zeros((y_pred.shape[0], 2))
+    ci_amplitude = predictor_ci.predict(X)
+    
+    for i in range(0, y_pred.shape[0]) :
+        ci[i,0] = y_pred - ci_amplitude[i]
+        ci[i,1] = y_pred + ci_amplitude[i]
+    
+    return ci
 
 if __name__ == "__main__" :
     
@@ -166,6 +201,9 @@ if __name__ == "__main__" :
         regressor = RandomForestRegressor(oob_score=True, random_state=random_seed)
         regressor.fit(X_prop_train, y_prop_train)
         
+        # get predictions for the calibration set
+        y_cal_pred = regressor.predict(X_cal)
+        
         # get predictions for the test set from the learner
         y_test_pred = regressor.predict(X_test)
         r2_test = r2_score(y_test, y_test_pred)
@@ -178,8 +216,8 @@ if __name__ == "__main__" :
         X_test_ci = np.zeros((y_test.shape[0], len(column_names)), dtype=np.float32)
         
         # point predictions
-        X_train_ci[:,0] = regressor.predict(X_cal)
-        X_test_ci[:,0] = regressor.predict(X_test)
+        X_train_ci[:,0] = y_cal_pred
+        X_test_ci[:,0] = y_test_pred
         
         # difficulty estimation using KNN
         de_knn = DifficultyEstimator()
@@ -231,19 +269,64 @@ if __name__ == "__main__" :
         print("Shape of X_train_ci:", X_train_ci.shape)
         print("Shape of X_test_ci:", X_test_ci.shape)
         
+        # finally, we need a target (y) for our problem of confidence interval
+        # regression; we can obtain that by computing the absolute difference
+        # between the y_true and the y_pred for a dataset
+        y_train_ci = abs(y_cal - y_cal_pred)
+        
         # now, for the more complex part: we can use a PySRRegressor, but we
         # need to change the fitness function!
         ci_regressor = PySRRegressor(
-            niterations=1,
+            #tournament_selection_n=1,
+            #populations=1, # TODO this is just for debugging
+            #population_size=1, # TODO this is just for debugging
+            niterations=1000,
             binary_operators=["+", "-", "*", "/"],
             unary_operators=["sin", "cos", "log", "exp"],
-            loss_function=loss_function_julia, # defined as a string above
+            loss_function=loss_function_julia_penalize_smaller, # defined as a string above
             temp_equation_file=True, # does not clutter directory with temporary files
             verbosity=1,
+            random_state=random_seed,
             )
         
         print("Running symbolic regression...")
-        ci_regressor.fit(X_train_ci, y_cal)
+        ci_regressor.fit(X_train_ci, y_train_ci)
+        
+        print("Now computing confidence intervals for conformal set...")
+        ci_amplitude_cal = ci_regressor.predict(X_train_ci)
+        ci_cal = np.zeros((y_cal.shape[0], 2))
+        for i in range(0, y_cal.shape[0]) :
+            ci_cal[i,0] = y_cal_pred[i] - ci_amplitude_cal[i]
+            ci_cal[i,1] = y_cal_pred[i] + ci_amplitude_cal[i]
+        
+        # in fact, we could use something like
+        #ci_cal[:,0] = y_cal_pred - ci_amplitude_cal
+        #ci_cal[:,1] = y_cal_pred + ci_amplitude_cal
+        
+        # and now, compute some stats for the conformal set
+        ci_amplitude_mean = np.mean((ci_cal[:,1] - ci_cal[:,0]))
+        ci_amplitude_median = np.median((ci_cal[:,1] - ci_cal[:,0]))
+        coverage = np.sum([1 if (y_cal[i] >= ci_cal[i,0] and
+                               y_cal[i] <= ci_cal[i,1]) else 0
+                        for i in range(len(y_cal))])/len(y_cal)
+        print("Mean amplitude on conformal set: %.4f" % ci_amplitude_mean)
+        print("Median amplitude on conformal set: %.4f" % ci_amplitude_median)
+        print("Coverage on conformal set: %.4f" % coverage)
+        
+        ci_amplitude_test = ci_regressor.predict(X_test_ci)
+        ci_test = np.zeros((y_test.shape[0], 2))
+        for i in range(0, y_test.shape[0]) :
+            ci_test[i,0] = y_test_pred[i] - ci_amplitude_test[i]
+            ci_test[i,1] = y_test_pred[i] + ci_amplitude_test[i]
+        
+        ci_amplitude_mean = np.mean((ci_test[:,1] - ci_test[:,0]))
+        ci_amplitude_median = np.median((ci_test[:,1] - ci_test[:,0]))
+        coverage = np.sum([1 if (y_test[i] >= ci_test[i,0] and
+                               y_test[i] <= ci_test[i,1]) else 0
+                        for i in range(len(y_test))])/len(y_test)
+        print("Mean amplitude on conformal set: %.4f" % ci_amplitude_mean)
+        print("Median amplitude on conformal set: %.4f" % ci_amplitude_median)
+        print("Coverage on conformal set: %.4f" % coverage)
         
         # TODO remove this
         sys.exit(0)
