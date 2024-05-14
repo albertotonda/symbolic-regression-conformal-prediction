@@ -94,6 +94,8 @@ if __name__ == "__main__" :
         task_folder = os.path.join(results_folder, dataset.name)
         if not os.path.exists(task_folder) :
             os.makedirs(task_folder)
+            
+        print("Starting work on dataset \"%s\"..." % dataset.name)
         
         # training/test split and normalization
         X_prop_train, X_test, y_prop_train, y_test = train_test_split(X, y, test_size=0.5, 
@@ -219,23 +221,44 @@ if __name__ == "__main__" :
             keep_iterating = True
             
             while keep_iterating and number_of_bins > 1 :
-                bins_cal, bin_thresholds = binning(sigmas_cal_var, bins=number_of_bins)
-                regressor_mond = WrapRegressor(learner_prop)
-                regressor_mond.calibrate(X_cal, y_cal, bins=bins_cal)
                 
-                bins_test = binning(sigmas_test_var, bins=bin_thresholds)
-                intervals_mond = regressor_mond.predict_int(X_test, bins=bins_test)
+                # capture a warning that can happen during binning
+                with warnings.catch_warnings(record=True) :
+                    # this line makes raising warning the same as raising exceptions
+                    warnings.simplefilter("error")
+                    
+                    try :
+                        bins_cal, bin_thresholds = binning(sigmas_cal_var, bins=number_of_bins)
+                        regressor_mond = WrapRegressor(learner_prop)
+                        regressor_mond.calibrate(X_cal, y_cal, bins=bins_cal)
+                        
+                        bins_test = binning(sigmas_test_var, bins=bin_thresholds)
+                        intervals_mond = regressor_mond.predict_int(X_test, bins=bins_test)
+                    
+                        keep_iterating = False
+                        
+                    except UserWarning as w :
+                        print(w)
+                        print("UserWarning raised, the bins do not contain enough samples, retrying...")
+                        number_of_bins -= 1
                 
                 # check: if the confidence intervals do not contain any '-inf', '+inf'
                 # we stop; otherwise, reduce number of bins and iterate
-                if np.isfinite(intervals_mond).any() :
-                    keep_iterating = False
-                    print("Found non-infinite confidence intervals for Mondrian conformal predictors for %d bins, stopping" %
-                          number_of_bins)
-                else :
-                    print("Found infinite confidence intervals for Mondrian conformal predictor at %d bins, iterating..."
-                          % number_of_bins)
-                    number_of_bins -= 1
+                # TODO: now, this does not work as intended, because some of the bins
+                # might be empty (!) so in the conformal set we will have no
+                # infinite confidence intervals, but they might appear in the test set;
+                # the code below does not work, the proper way of dealing with this
+                # is instead to capture the UserWarning as an error, and act
+                # accordingly; see the code above for catching UserWarning
+                
+                #if np.isfinite(intervals_mond).any() :
+                #    keep_iterating = False
+                #    print("Found non-infinite confidence intervals for Mondrian conformal predictors for %d bins, stopping" %
+                #          number_of_bins)
+                #else :
+                #    print("Found infinite confidence intervals for Mondrian conformal predictor at %d bins, iterating..."
+                #          % number_of_bins)
+                #    number_of_bins -= 1
             
             task_results["mondrian_cp"] = intervals_mond
             results_dictionary["mondrian_bins"].append(number_of_bins)

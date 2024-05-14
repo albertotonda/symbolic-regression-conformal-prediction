@@ -11,6 +11,7 @@ tweaking, so I moved them to a separate file
 import numpy as np
 import openml
 import os
+import pandas as pd
 import seaborn as sns
 import sys
 
@@ -26,7 +27,8 @@ from sklearn.preprocessing import StandardScaler
 from common import load_and_preprocess_openml_task, plot_confidence_intervals, plot_pareto, translations
 
 # unfortunately, using pysr we can define a custom loss function...in Julia.
-# since the syntax is different, we can only use a string
+# since the syntax is different, we can only use a string that is then passed
+# to the Julia interpreter internally inside the PySRRegressor object
 loss_function_julia = """
 function my_custom_objective(tree, dataset::Dataset{T,L}, options) where {T,L}
     (prediction, completion) = eval_tree_array(tree, dataset.X, options)
@@ -77,18 +79,34 @@ end
 
 loss_function_julia_penalize_smaller = """
 function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
+    
+    # get predicted values for the current tree    
     prediction, flag = eval_tree_array(tree, dataset.X, options)
+    
+    # 'flag' == false means that evaluating the tree caused an error
     if !flag
         return L(Inf)
     end
     
     result = 0.0
+    coverage = 0.0
+    coverage_penalty = 100.0
+    
+    # instead of just having a sum of squared means, we penalize more heavily
+    # samples for which the predictions are inferior to 'y' (here the difference
+    # between the true value and the predicted value)
     for i in 1:length(dataset.y)
         if (prediction[i] < dataset.y[i])
             result += 10 * (prediction[i] - dataset.y[i])^2
         else
             result += (prediction[i] - dataset.y[i])^2
+            coverage += 1
         end
+    end
+    
+    if ((coverage / dataset.n) < 0.95)
+        # penalty is equal to the difference between complete coverage and current result * weight
+        result += (0.95 - coverage/dataset.n) * dataset.n * coverage_penalty 
     end
     
     return result / dataset.n
@@ -149,7 +167,7 @@ if __name__ == "__main__" :
     
     # create data structures to store the results
     results_dictionary = {
-        'task_id' : [], 'dataset_name' : [], 'r2' : [],
+        'task_id' : [], 'dataset_name' : [], 'r2' : [], 'coverage' : [], 'mean_amplitude' : [], 'median_amplitude' : [],
         }
     
     # prepare directory for the results
@@ -324,9 +342,23 @@ if __name__ == "__main__" :
         coverage = np.sum([1 if (y_test[i] >= ci_test[i,0] and
                                y_test[i] <= ci_test[i,1]) else 0
                         for i in range(len(y_test))])/len(y_test)
-        print("Mean amplitude on conformal set: %.4f" % ci_amplitude_mean)
-        print("Median amplitude on conformal set: %.4f" % ci_amplitude_median)
-        print("Coverage on conformal set: %.4f" % coverage)
+        print("Mean amplitude on test set: %.4f" % ci_amplitude_mean)
+        print("Median amplitude on test set: %.4f" % ci_amplitude_median)
+        print("Coverage on conformal test: %.4f" % coverage)
         
-        # TODO remove this
+        # save data; first, set of equations (it's already a DataFrame)
+        ci_regressor.equations_.to_csv(os.path.join(task_folder, "equations.csv"), index=False)
+        
+        # then, update the results file
+        results_dictionary["task_id"].append(task_id)
+        results_dictionary["dataset_name"].append(dataset.name)
+        results_dictionary["r2"].append(r2_test)
+        results_dictionary["coverage"].append(coverage)
+        results_dictionary["mean_amplitude"].append(ci_amplitude_mean)
+        results_dictionary["median_amplitude"].append(ci_amplitude_median)
+        
+        df_results = pd.DataFrame.from_dict(results_dictionary)
+        df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
+        
+        # TODO remove this, it's only used for debugging
         sys.exit(0)
