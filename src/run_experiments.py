@@ -10,6 +10,7 @@ import numpy as np
 import openml
 import os
 import pandas as pd
+import pickle
 import seaborn as sns
 import sys
 
@@ -166,13 +167,13 @@ if __name__ == "__main__" :
         os.makedirs(results_folder)
     
     # start the loop, for every task
-    for task_id in task_ids :
+    for task_index, task_id in enumerate(task_ids) :
         
         # data structure for results related to this task
         task_results = {}
         
         # get the task
-        print("Downloading and pre-processing task %d..." % task_id)
+        print("Downloading and pre-processing task %d (%d/%d)..." % (task_id, task_index+1, len(task_ids)))
         df_X, df_y, task = load_and_preprocess_openml_task(task_id)
         
         # get names for features and target
@@ -399,14 +400,14 @@ if __name__ == "__main__" :
                 #tournament_selection_n=1,
                 #populations=1, # TODO this is just for debugging
                 #population_size=1, # TODO this is just for debugging
-                #population_size=500, # TODO this is for the real experiments
-                #niterations=1000, # TODO this is also for the real experiments
+                population_size=500, # TODO this is for the real experiments
+                niterations=1000, # TODO this is also for the real experiments
                 binary_operators=["+", "-", "*", "/"],
                 unary_operators=["sin", "cos", "log", "exp"],
                 loss_function=loss_function_julia_penalize_smaller, # defined as a string above
                 variable_names = column_names + feature_names,
                 temp_equation_file=True, # does not clutter directory with temporary files
-                verbosity=1,
+                verbosity=1, # can also be set to 0, it should be ok
                 random_state=random_seed,
                 )
             
@@ -426,6 +427,10 @@ if __name__ == "__main__" :
             # store the results in the data structure that we used for the other
             # methods
             task_results["symbolic_regression_cp"] = ci_test
+            
+            # save the predictor as a pickle file
+            with open(os.path.join(task_folder, "symbolic_regression_cp.pk"), "wb") as fp :
+                pickle.dump(ci_regressor, fp)
         
         # post-processing of the results for the different confidence intervals
         # statistics we are interested in: coverage, mean size, median size
