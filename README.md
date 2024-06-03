@@ -1,6 +1,12 @@
 # Symbolic Regression for Conformal Prediction Confidence Intervals
 
+## Ideas
+Use the boundaries of the Mondrian predictors as initial seeds for the values in the GP.
+
 ## Notes
+
+### 2024-06-03
+There are some issues that previously did not exist with KNN. Maybe it's due to scikit-learn version 1.5; I could try to create an environment with scikit-learn==1.4.2
 
 ### 2024-05-14
 Easier approach to fitness: just fit the distance between predicted and true point. However, penalize more if the distance is smaller.

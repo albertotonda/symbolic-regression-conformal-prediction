@@ -183,6 +183,10 @@ if __name__ == "__main__" :
         print("Downloading and pre-processing task...")
         df_X, df_y, task = load_and_preprocess_openml_task(task_id)
         
+        # get names for features and target
+        feature_names = [c for c in df_X.columns]
+        #target_name = df_y.columns[0]
+        
         # get actual numpy values
         X = df_X.values
         y = df_y.values
@@ -302,6 +306,7 @@ if __name__ == "__main__" :
             binary_operators=["+", "-", "*", "/"],
             unary_operators=["sin", "cos", "log", "exp"],
             loss_function=loss_function_julia_penalize_smaller, # defined as a string above
+            variable_names = column_names + feature_names,
             temp_equation_file=True, # does not clutter directory with temporary files
             verbosity=1,
             random_state=random_seed,
@@ -361,4 +366,4 @@ if __name__ == "__main__" :
         df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
         
         # TODO remove this, it's only used for debugging
-        sys.exit(0)
+        #sys.exit(0)

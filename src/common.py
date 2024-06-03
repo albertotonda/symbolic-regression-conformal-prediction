@@ -19,6 +19,7 @@ translations = {
     "normalized_cp_knn_res" : "CP with intervals normalized using KNN on OOB residuals",
     "normalized_cp_norm_var" : "CP with intervals normalized using variance of ensemble predictors",
     "mondrian_cp" : "Mondrian CP",
+    "symbolic_regression_cp" : "Symbolic Regression CP"
     }
 
 def plot_confidence_intervals(y, y_pred, y_pred_ci) :
@@ -33,7 +34,7 @@ def plot_confidence_intervals(y, y_pred, y_pred_ci) :
         y_and_ci.append([y[i], y_pred[i], y_pred_ci[i]])
     y_and_ci = sorted(y_and_ci, key=lambda x : x[0])
     
-    fig, ax = plt.subplots(figsize=(10,8))
+    fig, ax = plt.subplots()#figsize=(10,8))
     
     # plot measured values and point predictions for y
     x = range(0, len(y))
@@ -44,7 +45,7 @@ def plot_confidence_intervals(y, y_pred, y_pred_ci) :
     ax.fill_between(x, [x[2][0] for x in y_and_ci], [x[2][1] for x in y_and_ci], color='orange', alpha=0.3)
     
     ax.set_xlabel("Samples sorted by increasing value of target")
-    ax.set_xlabel("Value of target y")
+    ax.set_ylabel("Value of target y")
     ax.legend(loc='best')
     
     return fig, ax

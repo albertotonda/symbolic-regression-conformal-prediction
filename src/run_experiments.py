@@ -23,8 +23,97 @@ from sklearn.preprocessing import StandardScaler
 
 from xgboost import XGBRegressor
 
+from pysr import PySRRegressor
+
 # local library
 from common import load_and_preprocess_openml_task, plot_confidence_intervals, plot_pareto, translations
+
+# unfortunately, using pysr we can define a custom loss function...in Julia.
+# since the syntax is different, we can only use a string that is then passed
+# to the Julia interpreter internally inside the PySRRegressor object
+loss_function_julia = """
+function my_custom_objective(tree, dataset::Dataset{T,L}, options) where {T,L}
+    (prediction, completion) = eval_tree_array(tree, dataset.X, options)
+    if !completion
+        return L(Inf)
+    end
+    
+    elements_covered = 0.0
+    fitness_coverage = 0.0
+    fitness_amplitude = 0.0
+    
+    # Julia arrays start indexing at 1! Oh joy!
+    for i in 1:length(dataset.y)
+        y_true = dataset.y[i]    
+        y_pred = dataset.X[1,i] # first column has predicted values
+        
+        lower_bound = y_pred - prediction[i]
+        upper_bound = y_pred + prediction[i]
+        
+        if (y_true > upper_bound && elements_covered < 0.95 * length(dataset.y))
+            fitness_coverage += (y_true - upper_bound)^2
+        elseif (y_true < lower_bound && elements_covered < 0.95 * length(dataset.y))
+            fitness_coverage += (lower_bound - y_true)^2
+        else
+            elements_covered += 1
+        end
+        
+        fitness_amplitude += y_pred^2
+        
+        if (i == 1 && false)
+            println("y_true=", y_true)
+            println("y_pred=", y_pred)
+            println("upper_bound=", upper_bound)
+            println("lower_bound=", lower_bound)
+            println("fitness_coverage=", fitness_coverage)
+            println("fitness_amplitude=", fitness_amplitude)
+        end
+        
+    end
+    
+    fitness_value = fitness_coverage * 1000 + fitness_amplitude
+    #println("fitness_value=", fitness_value)
+    
+    return fitness_value
+    
+end
+"""
+
+loss_function_julia_penalize_smaller = """
+function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
+    
+    # get predicted values for the current tree    
+    prediction, flag = eval_tree_array(tree, dataset.X, options)
+    
+    # 'flag' == false means that evaluating the tree caused an error
+    if !flag
+        return L(Inf)
+    end
+    
+    result = 0.0
+    coverage = 0.0
+    coverage_penalty = 100.0
+    
+    # instead of just having a sum of squared means, we penalize more heavily
+    # samples for which the predictions are inferior to 'y' (here the difference
+    # between the true value and the predicted value)
+    for i in 1:length(dataset.y)
+        if (prediction[i] < dataset.y[i])
+            result += 10 * (prediction[i] - dataset.y[i])^2
+        else
+            result += (prediction[i] - dataset.y[i])^2
+            coverage += 1
+        end
+    end
+    
+    if ((coverage / dataset.n) < 0.95)
+        # penalty is equal to the difference between complete coverage and current result * weight
+        result += (0.95 - coverage/dataset.n) * dataset.n * coverage_penalty 
+    end
+    
+    return result / dataset.n
+end
+"""
 
 if __name__ == "__main__" :
     
@@ -76,14 +165,18 @@ if __name__ == "__main__" :
     if not os.path.exists(results_folder) :
         os.makedirs(results_folder)
     
+    # start the loop, for every task
     for task_id in task_ids :
         
         # data structure for results related to this task
         task_results = {}
         
         # get the task
-        print("Downloading and pre-processing task...")
+        print("Downloading and pre-processing task %d..." % task_id)
         df_X, df_y, task = load_and_preprocess_openml_task(task_id)
+        
+        # get names for features and target
+        feature_names = [c for c in df_X.columns]
         
         # get actual numpy values
         X = df_X.values
@@ -95,7 +188,7 @@ if __name__ == "__main__" :
         if not os.path.exists(task_folder) :
             os.makedirs(task_folder)
             
-        print("Starting work on dataset \"%s\"..." % dataset.name)
+        print("Starting work on dataset \"%s\" for task %d..." % (dataset.name, task_id))
         
         # training/test split and normalization
         X_prop_train, X_test, y_prop_train, y_test = train_test_split(X, y, test_size=0.5, 
@@ -126,7 +219,8 @@ if __name__ == "__main__" :
         regressor = WrapRegressor(RandomForestRegressor(oob_score=True, random_state=random_seed))
         regressor.fit(X_prop_train, y_prop_train)
         
-        # get predictions for the test set from the learner
+        # get predictions for the test set and calibration set from the learner
+        y_cal_pred = regressor.predict(X_cal)
         y_test_pred = regressor.predict(X_test)
         r2_test = r2_score(y_test, y_test_pred)
         
@@ -263,11 +357,75 @@ if __name__ == "__main__" :
             task_results["mondrian_cp"] = intervals_mond
             results_dictionary["mondrian_bins"].append(number_of_bins)
             
-        # TODO: symbolic regression intervals, using all sigmas
-        
-        # step 1: prepare data set with all sigmas and stuff on calibration set
-        # one feature per type of sigma; we 
-        
+        # proposed approach: symbolic regression intervals, using all sigmas
+        if True :
+            # step 1: prepare data sets with all sigmas and stuff on calibration set
+            # and test set; these will be a special version, just for symbolic regression
+            column_names = ["y_pred", "de_knn", "de_knn_std", "de_knn_oob_res", 
+                            "de_cal_ensemble_var"]
+            X_train_sr = np.zeros((y_cal.shape[0], len(column_names)), dtype=np.float32)
+            X_test_sr = np.zeros((y_test.shape[0], len(column_names)), dtype=np.float32)
+            
+            # add point predictions
+            X_train_sr[:,0] = y_cal_pred
+            X_test_sr[:,0] = y_test_pred
+            # add difficulty estimation using KNN on distance
+            X_train_sr[:,1] = sigmas_cal_knn_dist
+            X_test_sr[:,1] = sigmas_test_knn_dist
+            # add difficulty estimation using standard deviations
+            X_train_sr[:,2] = sigmas_cal_knn_std
+            X_test_sr[:,2] = sigmas_test_knn_std
+            # add difficulty estimation using OOB predictions
+            X_train_sr[:,3] = sigmas_cal_knn_res
+            X_test_sr[:,3] = sigmas_test_knn_res
+            # difficulty estimation using variance of predictors in ensemble
+            X_train_sr[:,4] = sigmas_cal_var
+            X_test_sr[:,4] = sigmas_test_var
+            # TODO: information used by the Mondrian conformal predictors is not immediately
+            # applicable, unless I use something about the bins? to be explored
+            # finally, add the feature information from the original data set
+            X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
+            X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
+            
+            # finally, we need a target (y) for our problem of confidence interval
+            # regression; we can obtain that by computing the absolute difference
+            # between the y_true and the y_pred for a dataset
+            y_train_sr = abs(y_cal - y_cal_pred)
+            
+            # now, for the more complex part: we can use a PySRRegressor, but we
+            # need to change the fitness function! the fitness function is described
+            # as a string (lines of Julia), at the very beginning of this script
+            ci_regressor = PySRRegressor(
+                #tournament_selection_n=1,
+                #populations=1, # TODO this is just for debugging
+                #population_size=1, # TODO this is just for debugging
+                #population_size=500, # TODO this is for the real experiments
+                #niterations=1000, # TODO this is also for the real experiments
+                binary_operators=["+", "-", "*", "/"],
+                unary_operators=["sin", "cos", "log", "exp"],
+                loss_function=loss_function_julia_penalize_smaller, # defined as a string above
+                variable_names = column_names + feature_names,
+                temp_equation_file=True, # does not clutter directory with temporary files
+                verbosity=1,
+                random_state=random_seed,
+                )
+            
+            print("Running symbolic regression...")
+            ci_regressor.fit(X_train_sr, y_train_sr)
+            
+            print("Now computing confidence intervals for conformal set...")
+            ci_amplitude_cal = ci_regressor.predict(X_train_sr)
+            
+            print("And computing confidence intervals for test set...")
+            ci_amplitude_test = ci_regressor.predict(X_test_sr)
+            ci_test = np.zeros((y_test.shape[0], 2))
+            for i in range(0, y_test.shape[0]) :
+                ci_test[i,0] = y_test_pred[i] - ci_amplitude_test[i]
+                ci_test[i,1] = y_test_pred[i] + ci_amplitude_test[i]
+                
+            # store the results in the data structure that we used for the other
+            # methods
+            task_results["symbolic_regression_cp"] = ci_test
         
         # post-processing of the results for the different confidence intervals
         # statistics we are interested in: coverage, mean size, median size

@@ -22,9 +22,10 @@ if __name__ == "__main__" :
     
     # hard-coded variables
     random_seed = 42
-    use_predefined_splits = False
+    use_predefined_splits = True
     prng = random.Random() # pseudo-random number generator will be useful later
     prng.seed(random_seed)
+    regressor_classes = [RandomForestRegressor, XGBRegressor]
     
     # load CTR23 regression benchmark suite
     suite = openml.study.get_suite(353)
@@ -38,8 +39,11 @@ if __name__ == "__main__" :
     
     # prepare data structure to store information
     statistics_dictionary = {'task_id' : [], 'dataset_name' : [], 'target_name': [], 'n_samples' : [],
-                             'n_features' : [], 'missing_data' : [], 'categorical_features' : [],
-                             'R2' : [], 'MSE' : []}
+                             'n_features' : [], 'missing_data' : [], 'categorical_features' : [],}
+    
+    for regressor_class in regressor_classes :
+        statistics_dictionary['R2_' + regressor_class.__name__] = []
+        statistics_dictionary['MSE_' + regressor_class.__name__] = []
     
     for task_id in task_ids :
         
@@ -81,49 +85,53 @@ if __name__ == "__main__" :
         dataset = task.get_dataset()
         print("Task %d is applied to data set \"%s\" (id=%d)" % (task_id, dataset.name, dataset.dataset_id))
         
-        # mean performance of Random Forest 
-        rf_r2 = []
-        rf_mse = []
-        
-        for fold in range(0, 10) :
-            print("Evaluating RF performance on fold %d..." % fold)
-            # initialize random forest regressor
-            #rf = RandomForestRegressor(random_state=random_seed)
-            rf = XGBRegressor(random_state=random_seed)
+        for regressor_class in regressor_classes :
+            # mean performance of regressor 
+            regressor_name = regressor_class.__name__
+            regressor_r2 = []
+            regressor_mse = []
             
-            if use_predefined_splits :
-                # get splits for N-fold cross-validation
-                # NOTE: this ignores repetitions, for a few data sets the evaluation
-                # is something like 10x(10-fold cross-validation), and here we are only
-                # performing one
-                train_index, test_index = task.get_train_test_split_indices(fold=fold)
-            else :
-                # otherwise, we go for a nice 50/50 split, just like the funny
-                # guys that use conformal predictors; we need to instantiate
-                # the object managing the cross-validation with a different random
-                # seed at each iteration, to avoid issues
-                cv_random_seed = random.randint(0, 10000)
-                kf = KFold(n_splits=2, shuffle=True, random_state=cv_random_seed)
-                folds = [(train_index, test_index) for train_index, test_index in kf.split(X, y)]
-                train_index, test_index = folds[0]
-            
-            X_train, X_test = X[train_index], X[test_index]
-            y_train, y_test = y[train_index], y[test_index]
-            
-            # normalization (it should not impact performance at all, let's see)
-            scaler_X = StandardScaler()
-            scaler_y = StandardScaler()
-            
-            X_train = scaler_X.fit_transform(X_train)
-            X_test = scaler_X.transform(X_test)
-            y_train = scaler_y.fit_transform(y_train.reshape(-1,1)).ravel()
-            y_test = scaler_y.transform(y_test.reshape(-1,1)).ravel()
-            
-            rf.fit(X_train, y_train)
-            y_pred = rf.predict(X_test)
-            
-            rf_r2.append(r2_score(y_test, y_pred))
-            rf_mse.append(mean_squared_error(y_test, y_pred))
+            for fold in range(0, 10) :
+                print("Evaluating \"%s\" performance on fold %d..." % (regressor_name, fold))
+                # initialize regressor
+                regressor = regressor_class(random_state=random_seed)
+                
+                if use_predefined_splits :
+                    # get splits for N-fold cross-validation
+                    # NOTE: this ignores repetitions, for a few data sets the evaluation
+                    # is something like 10x(10-fold cross-validation), and here we are only
+                    # performing one
+                    train_index, test_index = task.get_train_test_split_indices(fold=fold)
+                else :
+                    # otherwise, we go for a nice 50/50 split, just like the funny
+                    # guys that use conformal predictors; we need to instantiate
+                    # the object managing the cross-validation with a different random
+                    # seed at each iteration, to avoid issues
+                    cv_random_seed = random.randint(0, 10000)
+                    kf = KFold(n_splits=2, shuffle=True, random_state=cv_random_seed)
+                    folds = [(train_index, test_index) for train_index, test_index in kf.split(X, y)]
+                    train_index, test_index = folds[0]
+                
+                X_train, X_test = X[train_index], X[test_index]
+                y_train, y_test = y[train_index], y[test_index]
+                
+                # normalization (it should not impact performance at all, let's see)
+                scaler_X = StandardScaler()
+                scaler_y = StandardScaler()
+                
+                X_train = scaler_X.fit_transform(X_train)
+                X_test = scaler_X.transform(X_test)
+                y_train = scaler_y.fit_transform(y_train.reshape(-1,1)).ravel()
+                y_test = scaler_y.transform(y_test.reshape(-1,1)).ravel()
+                
+                regressor.fit(X_train, y_train)
+                y_pred = regressor.predict(X_test)
+                
+                regressor_r2.append(r2_score(y_test, y_pred))
+                regressor_mse.append(mean_squared_error(y_test, y_pred))
+                
+            statistics_dictionary['R2_' + regressor_name].append("%.2f +/- %.2f" % (np.mean(regressor_r2), np.std(regressor_r2)))
+            statistics_dictionary['MSE_' + regressor_name].append("%.2f +/- %.2f" % (np.mean(regressor_mse), np.std(regressor_mse)))
             
         # what I am interested in knowing:
         # number of samples
@@ -140,8 +148,6 @@ if __name__ == "__main__" :
         statistics_dictionary['missing_data'].append('{:,}'.format(missing_data))
         statistics_dictionary['categorical_features'].append(categorical_features)
         
-        statistics_dictionary['R2'].append("%.2f +/- %.2f" % (np.mean(rf_r2), np.std(rf_r2)))
-        statistics_dictionary['MSE'].append("%.2f +/- %.2f" % (np.mean(rf_mse), np.std(rf_mse)))
         
         df_statistics = pd.DataFrame.from_dict(statistics_dictionary)
         df_statistics.to_csv("OpenML-CTR23-statistics.csv", index=False)
