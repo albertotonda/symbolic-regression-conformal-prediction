@@ -1,0 +1,4 @@
+,conformal_predictor,normalized_cp_knn_dist,normalized_cp_knn_std,normalized_cp_knn_res,normalized_cp_norm_var,mondrian_cp,symbolic_regression_cp
+non-dominated,6,5,6,10,11,14,20
+dominated,16,17,16,12,11,8,2
+alone,0,0,0,0,0,0,3

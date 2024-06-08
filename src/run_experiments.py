@@ -116,7 +116,7 @@ function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
 end
 """
 
-if __name__ == "__main__" :
+def run_experiment(random_seed=42) :
     
     # for each dataset
     # - split training/calibration/test; 60/20/20 (no cross-validation)
@@ -131,8 +131,7 @@ if __name__ == "__main__" :
     #   -- plus (predicted?) value of the target?
     
     # hard-coded variables
-    random_seed = 42
-    results_folder = "results"
+    results_folder = "results-%d" % random_seed
     results_csv = "results.csv"
     tasks_too_good = [361236, 361247, 361252, 361254, 361256, 
                       361257, 361268, 361617]
@@ -165,6 +164,9 @@ if __name__ == "__main__" :
     # prepare directory for the results
     if not os.path.exists(results_folder) :
         os.makedirs(results_folder)
+    
+    # TODO remove this, it's just to progress the experiments
+    #task_ids = [361266, 361260]
     
     # start the loop, for every task
     for task_index, task_id in enumerate(task_ids) :
@@ -217,7 +219,7 @@ if __name__ == "__main__" :
         #regressor = WrapRegressor(XGBRegressor(random_state=random_seed))
         # the argument 'oob_score=True' is to compute and keep track of the score
         # and performance on samples that are not used to train each predictor
-        regressor = WrapRegressor(RandomForestRegressor(oob_score=True, random_state=random_seed))
+        regressor = WrapRegressor(RandomForestRegressor(n_estimators=500, oob_score=True, random_state=random_seed))
         regressor.fit(X_prop_train, y_prop_train)
         
         # get predictions for the test set and calibration set from the learner
@@ -312,7 +314,7 @@ if __name__ == "__main__" :
             # but "enough values" is dependent on the number of bins, so we can
             # iterate until either the number of bins goes to 1, or until the 
             # size of the confidence intervals is not infinite
-            number_of_bins = 20
+            number_of_bins = 99
             keep_iterating = True
             
             while keep_iterating and number_of_bins > 1 :
@@ -385,8 +387,9 @@ if __name__ == "__main__" :
             # TODO: information used by the Mondrian conformal predictors is not immediately
             # applicable, unless I use something about the bins? to be explored
             # finally, add the feature information from the original data set
-            X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
-            X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
+            # TODO: uncomment these two lines to also add the info on the features
+            #X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
+            #X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
             
             # finally, we need a target (y) for our problem of confidence interval
             # regression; we can obtain that by computing the absolute difference
@@ -400,12 +403,12 @@ if __name__ == "__main__" :
                 #tournament_selection_n=1,
                 #populations=1, # TODO this is just for debugging
                 #population_size=1, # TODO this is just for debugging
-                population_size=500, # TODO this is for the real experiments
-                niterations=1000, # TODO this is also for the real experiments
+                population_size=100, # TODO this is for the real experiments
+                niterations=2000, # TODO this is also for the real experiments
                 binary_operators=["+", "-", "*", "/"],
                 unary_operators=["sin", "cos", "log", "exp"],
                 loss_function=loss_function_julia_penalize_smaller, # defined as a string above
-                variable_names = column_names + feature_names,
+                #variable_names = column_names + feature_names, # this one apparently does not work
                 temp_equation_file=True, # does not clutter directory with temporary files
                 verbosity=1, # can also be set to 0, it should be ok
                 random_state=random_seed,
@@ -497,3 +500,12 @@ if __name__ == "__main__" :
     # it has to be done data set by data set, and maybe I could write a specific
     # post-processing script
     
+    return
+
+if __name__ == "__main__" :
+    
+    # let's run several experiments in a row, with different random seeds
+    random_seeds = [i*10 + 2 for i in range(5, 34)]
+    #random_seeds = [52] # uncomment this line for just one repetition
+    for random_seed in random_seeds :
+        run_experiment(random_seed)

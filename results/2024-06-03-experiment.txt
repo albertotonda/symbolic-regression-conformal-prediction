@@ -1,3 +1,4 @@
 # Experiment 2024-06-03
 
 Standard settings for SR, 22 datasets (not too good, not too bad).
+n_bins=20 for Mondrian CP.

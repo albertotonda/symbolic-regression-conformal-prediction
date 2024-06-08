@@ -15,7 +15,7 @@ import sys
 def is_dominated(considered_point, other_point) :
     
     # first fitness is median, smaller is better; second fitness is coverage, larger is better
-    if considered_point[0] > other_point[0] and considered_point[1] < other_point[1] :
+    if considered_point[0] > other_point[0] and considered_point[1] <= other_point[1] :
         return True
     else :
         return False
@@ -27,7 +27,7 @@ if __name__ == "__main__" :
     fitness_1_name = "_coverage"
     fitness_2_name = "_median"
     
-    results_file = "results/results.csv"
+    results_file = "../results/2024-06-07-full-results/results.csv"
     df = pd.read_csv(results_file)
     
     # find the names for all methods, and the corresponding columns
@@ -61,6 +61,9 @@ if __name__ == "__main__" :
         # generate the set of points          
         points = [(row[methods[method][0]], row[methods[method][1]]) for method in methods]
         #print(points)
+        if row["dataset_name"] == "red_wine" :
+            for i, method in enumerate(methods) :
+                print("Method: %s, point: (%s)" % (method, str(points[i])))
         
         # now, check if the point corresponding to a method is dominated
         for method in methods :

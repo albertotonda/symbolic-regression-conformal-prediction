@@ -1,0 +1,4 @@
+# Experiment on David and Alejandro's server, 2024-06-05
+
+Mondrian CP: n_bins=99
+SRCP: mu=50, niterations=1000

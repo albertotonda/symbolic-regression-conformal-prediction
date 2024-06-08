@@ -1,0 +1,5 @@
+# Experiment on David and Alejandro's server, 2024-06-07
+
+RandomForest: n_estimators=500 (to emulate results from other papers)
+Mondrian CP: n_bins=99
+SRCP: mu=100, niterations=2000

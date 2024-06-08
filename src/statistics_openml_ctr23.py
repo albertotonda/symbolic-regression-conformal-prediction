@@ -22,7 +22,7 @@ if __name__ == "__main__" :
     
     # hard-coded variables
     random_seed = 42
-    use_predefined_splits = True
+    use_predefined_splits = False
     prng = random.Random() # pseudo-random number generator will be useful later
     prng.seed(random_seed)
     regressor_classes = [RandomForestRegressor, XGBRegressor]
@@ -94,7 +94,7 @@ if __name__ == "__main__" :
             for fold in range(0, 10) :
                 print("Evaluating \"%s\" performance on fold %d..." % (regressor_name, fold))
                 # initialize regressor
-                regressor = regressor_class(random_state=random_seed)
+                regressor = regressor_class(n_estimators=500, random_state=random_seed, n_jobs=-1)
                 
                 if use_predefined_splits :
                     # get splits for N-fold cross-validation
