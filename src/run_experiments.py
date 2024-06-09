@@ -388,8 +388,8 @@ def run_experiment(random_seed=42) :
             # applicable, unless I use something about the bins? to be explored
             # finally, add the feature information from the original data set
             # TODO: uncomment these two lines to also add the info on the features
-            #X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
-            #X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
+            X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
+            X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
             
             # finally, we need a target (y) for our problem of confidence interval
             # regression; we can obtain that by computing the absolute difference
