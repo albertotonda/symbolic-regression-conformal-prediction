@@ -1,4 +1,4 @@
-# Symbolic Regression for Conformal Prediction Confidence Intervals
+# Symbolic Regression of Confidence Intervals for Conformal Prediction 
 
 Code and results for the paper "Symbolic Regression of Confidence Intervals for Conformal Prediction", submitted to the EA 2024 conference, https://ea2024.inria.fr/
 
