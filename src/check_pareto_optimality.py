@@ -8,6 +8,7 @@ a few methods (so, just a few points in a 2D space).
 @author: Alberto
 """
 
+import os 
 import pandas as pd
 import sys
 
@@ -27,8 +28,10 @@ if __name__ == "__main__" :
     fitness_1_name = "_coverage"
     fitness_2_name = "_median"
     
-    results_file = "../results/2024-06-07-full-results/results.csv"
-    df = pd.read_csv(results_file)
+    #results_folder = "../results/2024-06-07-full-results/"
+    results_folder = "../results/2024-06-17-full-results/results-52"
+    results_file = "results.csv"
+    df = pd.read_csv(os.path.join(results_folder, results_file))
     
     # find the names for all methods, and the corresponding columns
     methods = dict()
@@ -87,4 +90,4 @@ if __name__ == "__main__" :
             
     # and now, some nice formatting for the results
     df_statistics = pd.DataFrame.from_dict(methods_statistics)
-    df_statistics.to_csv("results-statistics.csv")
+    df_statistics.to_csv(os.path.join(results_folder, "results-statistics.csv"))
