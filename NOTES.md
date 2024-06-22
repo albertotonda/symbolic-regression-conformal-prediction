@@ -3,6 +3,7 @@
 ## Ideas to be developed
 1. Use the boundaries of the Mondrian predictors as initial seeds for the values in the GP.
 2. If extracting the sigmas from the Mondrian predictors is impossible, extract directly the lambdas.
+3. After obtaining the final Pareto frontier, remove all solutions that do not respect the hard constraint of $(1-\alpha)$ coverage, and from those left, pick the one with the best value of the fitness function.
 
 ## Chronological notes
 

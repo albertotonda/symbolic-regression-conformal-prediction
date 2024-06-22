@@ -16,7 +16,7 @@ import sys
 def is_dominated(considered_point, other_point) :
     
     # first fitness is median, smaller is better; second fitness is coverage, larger is better
-    if considered_point[0] > other_point[0] and considered_point[1] <= other_point[1] :
+    if considered_point[0] >= other_point[0] and considered_point[1] <= other_point[1] :
         return True
     else :
         return False
@@ -61,17 +61,17 @@ if __name__ == "__main__" :
         print("Now analyzing dataset \"%s\"..." % row["dataset_name"])
         non_dominated_methods = []
         
-        # generate the set of points          
-        points = [(row[methods[method][0]], row[methods[method][1]]) for method in methods]
         #print(points)
-        if row["dataset_name"] == "red_wine" :
-            for i, method in enumerate(methods) :
-                print("Method: %s, point: (%s)" % (method, str(points[i])))
+        #if row["dataset_name"] == "red_wine" :
+        #    for i, method in enumerate(methods) :
+        #        print("Method: %s, point: (%s)" % (method, str(points[i])))
         
         # now, check if the point corresponding to a method is dominated
         for method in methods :
             method_point = (row[methods[method][0]], row[methods[method][1]])
             #print("Method %s, point: %s" % (method, str(method_point)))
+            points = [(row[methods[other_method][0]], row[methods[other_method][1]]) 
+                      for other_method in methods if other_method != method]
             
             is_method_point_dominated = False
             for point in points :
