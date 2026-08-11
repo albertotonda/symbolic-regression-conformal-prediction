@@ -136,6 +136,93 @@ def load_and_preprocess_openml_task(task_id) :
        
     return df_X, df_y, task
 
+# unfortunately, using pysr we can define a custom loss function...in Julia.
+# since the syntax is different, we can only use a string that is then passed
+# to the Julia interpreter internally inside the PySRRegressor object
+loss_function_julia = """
+function my_custom_objective(tree, dataset::Dataset{T,L}, options) where {T,L}
+    (prediction, completion) = eval_tree_array(tree, dataset.X, options)
+    if !completion
+        return L(Inf)
+    end
+    
+    elements_covered = 0.0
+    fitness_coverage = 0.0
+    fitness_amplitude = 0.0
+    
+    # Julia arrays start indexing at 1! Oh joy!
+    for i in 1:length(dataset.y)
+        y_true = dataset.y[i]    
+        y_pred = dataset.X[1,i] # first column has predicted values
+        
+        lower_bound = y_pred - prediction[i]
+        upper_bound = y_pred + prediction[i]
+        
+        if (y_true > upper_bound && elements_covered < 0.95 * length(dataset.y))
+            fitness_coverage += (y_true - upper_bound)^2
+        elseif (y_true < lower_bound && elements_covered < 0.95 * length(dataset.y))
+            fitness_coverage += (lower_bound - y_true)^2
+        else
+            elements_covered += 1
+        end
+        
+        fitness_amplitude += y_pred^2
+        
+        if (i == 1 && false)
+            println("y_true=", y_true)
+            println("y_pred=", y_pred)
+            println("upper_bound=", upper_bound)
+            println("lower_bound=", lower_bound)
+            println("fitness_coverage=", fitness_coverage)
+            println("fitness_amplitude=", fitness_amplitude)
+        end
+        
+    end
+    
+    fitness_value = fitness_coverage * 1000 + fitness_amplitude
+    #println("fitness_value=", fitness_value)
+    
+    return fitness_value
+    
+end
+"""
+
+loss_function_julia_penalize_smaller = """
+function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
+    
+    # get predicted values for the current tree    
+    prediction, flag = eval_tree_array(tree, dataset.X, options)
+    
+    # 'flag' == false means that evaluating the tree caused an error
+    if !flag
+        return L(Inf)
+    end
+    
+    result = 0.0
+    coverage = 0.0
+    coverage_penalty = 100.0
+    
+    # instead of just having a sum of squared means, we penalize more heavily
+    # samples for which the predictions are inferior to 'y' (here the difference
+    # between the true value and the predicted value)
+    for i in 1:length(dataset.y)
+        if (prediction[i] < dataset.y[i])
+            result += 10 * (prediction[i] - dataset.y[i])^2
+        else
+            result += (prediction[i] - dataset.y[i])^2
+            coverage += 1
+        end
+    end
+    
+    if ((coverage / dataset.n) < 0.95)
+        # penalty is equal to the difference between complete coverage and current result * weight
+        result += (0.95 - coverage/dataset.n) * dataset.n * coverage_penalty 
+    end
+    
+    return result / dataset.n
+end
+"""
+
 
 if __name__ == "__main__" :
     print("This file is not meant to be run directly, just imported.")
