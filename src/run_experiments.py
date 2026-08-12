@@ -56,9 +56,9 @@ class Config(BaseModel):
     confidence_level: float = Field(gt=0)
     max_mondrian_bins: int = Field(gt=1)
     predictor_model: str
-    predictor_params: dict
+    predictor_params: dict # at the moment, params are always those for random forests, might need better solution later
     ncp_knn_k: int = Field(gt=0)
-    sr_tournament_selection_n: int = Field(gt=0)
+    sr_tournament_selection_n: int = Field(gt=0, default=15)
     sr_population_size: int = Field(ge=12) # must be >= topn (default 12)
     sr_niterations: int = Field(gt=0)
     sr_binary_operators: list[str]

@@ -9,9 +9,8 @@
     "predictor_model": "RandomForestRegressor",
     "predictor_params": {"n_estimators": 500, "oob_score": true},
     "ncp_knn_k": 25,
-    "sr_tournament_selection_n": 1,
-    "sr_population_size": 1,
-    "sr_niterations": 50,
+    "sr_population_size": 100,
+    "sr_niterations": 2000,
     "sr_binary_operators": ["+", "-", "*", "/"],
     "sr_unary_operators": ["sin", "cos", "log", "exp"]
 }
