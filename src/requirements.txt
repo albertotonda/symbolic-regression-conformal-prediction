@@ -1,3 +1,4 @@
+annotated-types==0.8.0
 anyio==4.14.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
@@ -57,6 +58,8 @@ pure-eval==0.2.3
 pyarrow==25.0.1
 pycparser==3.0
 pycryptodome==3.23.0
+pydantic==2.13.4
+pydantic-core==2.46.4
 pygments==2.20.0
 pymdown-extensions==11.0.1
 pyparsing==3.3.2
@@ -81,6 +84,7 @@ tornado==6.5.8
 tqdm==4.70.0
 traitlets==5.16.1
 typing-extensions==4.16.0
+typing-inspection==0.4.4
 urllib3==2.7.0
 uvicorn==0.52.1
 wcwidth==0.8.2

@@ -11,10 +11,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import openml
 import os
+import json
 import pandas as pd
 import pickle
 import seaborn as sns
 import warnings
+
+from datetime import datetime
 
 from crepes import WrapRegressor
 from crepes.extras import MondrianCategorizer, DifficultyEstimator
@@ -28,25 +31,60 @@ from xgboost import XGBRegressor
 
 from pysr import PySRRegressor
 
+from pydantic import BaseModel, Field, field_validator
+
 # local library
 from common import (load_and_preprocess_openml_task, plot_confidence_intervals,
                      plot_pareto, translations, loss_function_julia_penalize_smaller)
 
-# hard-coded settings for the experiment
-SUITE_ID = 353
-TASKS_TOO_GOOD = [361236, 361247, 361252, 361254, 361256,
-                  361257, 361268, 361617]
-TASKS_TOO_BAD = [361243, 361244, 361261, 361618, 361619]
-RESULTS_CSV_NAME = "results.csv"
-CONFIDENCE_LEVEL = 0.95
-MAX_MONDRIAN_BINS = 99
+# regressor models selectable via the "predictor_model" config key or --predictor-model overwrite
+REGRESSOR_MODELS = {
+    "RandomForestRegressor": RandomForestRegressor,
+    "XGBRegressor": XGBRegressor
+}
 
-# settings for the PySRRegressor used to fit the symbolic-regression confidence intervals
-SR_TOURNAMENT_SELECTION_N = 1
-SR_POPULATION_SIZE = 15 # must be >= topn (default 12)
-SR_NITERATIONS = 50
-SR_BINARY_OPERATORS = ["+", "-", "*", "/"]
-SR_UNARY_OPERATORS = ["sin", "cos", "log", "exp"]
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
+
+
+class Config(BaseModel):
+    """All experiment settings; loaded from a JSON file and overwritable from the CLI."""
+    random_seeds: list[int]
+    suite_id: int
+    tasks_too_good: list[int]
+    tasks_too_bad: list[int]
+    results_csv_name: str
+    confidence_level: float = Field(gt=0)
+    max_mondrian_bins: int = Field(gt=1)
+    predictor_model: str
+    predictor_params: dict
+    ncp_knn_k: int = Field(gt=0)
+    sr_tournament_selection_n: int = Field(gt=0)
+    sr_population_size: int = Field(ge=12) # must be >= topn (default 12)
+    sr_niterations: int = Field(gt=0)
+    sr_binary_operators: list[str]
+    sr_unary_operators: list[str]
+
+    @field_validator("predictor_model")
+    @classmethod
+    def predictor_model_is_known(cls, v):
+        if v not in REGRESSOR_MODELS:
+            raise ValueError("must be one of %s" % list(REGRESSOR_MODELS))
+        return v
+
+
+def load_config(config_path, cli_overrides=None):
+    """
+    Load the base config from `config_path`, then apply any CLI overrides
+    (non-None values) on top; keys not overridden keep the config file's
+    value. Raises a pydantic ValidationError if the merged config is invalid.
+    """
+    print("Loading config...")
+    with open(config_path) as fp:
+        raw = json.load(fp)
+
+    raw.update({k: v for k, v in (cli_overrides or {}).items() if v is not None})
+
+    return Config(**raw)
 
 
 def get_benchmark_task_ids(suite_id, tasks_too_good, tasks_too_bad):
@@ -88,7 +126,7 @@ def prepare_task_data(task_id, results_folder, random_seed):
 
     print("Starting work on dataset \"%s\" for task %d..." % (dataset.name, task_id))
 
-    # training/test split and normalization
+    # training/test split and normalization; 50/25/25 split
     X_prop_train, X_test, y_prop_train, y_test = train_test_split(X, y, test_size=0.5,
                                                         shuffle=True, random_state=random_seed)
     X_cal, X_test, y_cal, y_test = train_test_split(X_test, y_test, test_size=0.5,
@@ -114,16 +152,14 @@ def prepare_task_data(task_id, results_folder, random_seed):
             feature_names, dataset, task_folder)
 
 
-def train_base_regressor(X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_test, random_seed):
+def train_base_regressor(X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_test,
+                          regressor_class, regressor_params, random_seed):
     """
-    Train the base regressor (Random Forest), wrap it as a conformal
-    regressor, and calibrate the standard conformal predictor.
+    Train the base regressor, wrap it as a conformal regressor, and
+    calibrate the standard conformal predictor.
     """
     print("Training regressor...")
-    #regressor = WrapRegressor(XGBRegressor(random_state=random_seed))
-    # the argument 'oob_score=True' is to compute and keep track of the score
-    # and performance on samples that are not used to train each predictor
-    regressor = WrapRegressor(RandomForestRegressor(n_estimators=500, oob_score=True, random_state=random_seed))
+    regressor = WrapRegressor(regressor_class(random_state=random_seed, **regressor_params))
     regressor.fit(X_prop_train, y_prop_train)
 
     # get predictions for the test set and calibration set from the learner
@@ -135,14 +171,6 @@ def train_base_regressor(X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_tes
     regressor.calibrate(X_cal, y_cal)
 
     return regressor, y_cal_pred, y_test_pred, r2_test
-
-
-def compute_standard_conformal_intervals(regressor, X_test, confidence):
-    """
-    Get confidence intervals for the test set from the calibrated conformal regressor.
-    """
-    print("Getting confidence intervals for the test set from conformal regressor...")
-    return regressor.predict_int(X_test, confidence=confidence)
 
 
 def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confidence):
@@ -226,11 +254,8 @@ def compute_mondrian_intervals(learner_prop, de_var, X_prop_train, X_cal, y_cal,
 
 
 def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pred,
-                             sigmas_cal_knn_dist, sigmas_test_knn_dist,
-                             sigmas_cal_knn_std, sigmas_test_knn_std,
-                             sigmas_cal_knn_res, sigmas_test_knn_res,
-                             sigmas_cal_var, sigmas_test_var,
-                             feature_names, task_folder, random_seed):
+                             sigmas_cal, sigmas_test,
+                             feature_names, task_folder, config, random_seed):
     """
     Train a PySRRegressor to predict the amplitude of a confidence interval
     around the point prediction, using point predictions, difficulty
@@ -241,32 +266,22 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     """
     # step 1: prepare data sets with all sigmas and stuff on calibration set
     # and test set; these will be a special version, just for symbolic regression
-    column_names = ["y_pred", "de_knn", "de_knn_std", "de_knn_oob_res",
-                    "de_cal_ensemble_var"]
-    X_train_sr = np.zeros((y_cal.shape[0], len(column_names)), dtype=np.float32)
-    X_test_sr = np.zeros((y_test.shape[0], len(column_names)), dtype=np.float32)
+    X_train_sr = np.zeros((y_cal.shape[0], len(sigmas_cal)+1), dtype=np.float32)
+    X_test_sr = np.zeros((y_test.shape[0], len(sigmas_cal)+1), dtype=np.float32)
 
     # TODO: are sigmas still relevant?
 
     # add point predictions
     X_train_sr[:,0] = y_cal_pred
     X_test_sr[:,0] = y_test_pred
-    # add difficulty estimation using KNN on distance
-    X_train_sr[:,1] = sigmas_cal_knn_dist
-    X_test_sr[:,1] = sigmas_test_knn_dist
-    # add difficulty estimation using standard deviations
-    X_train_sr[:,2] = sigmas_cal_knn_std
-    X_test_sr[:,2] = sigmas_test_knn_std
-    # add difficulty estimation using OOB predictions
-    X_train_sr[:,3] = sigmas_cal_knn_res
-    X_test_sr[:,3] = sigmas_test_knn_res
-    # difficulty estimation using variance of predictors in ensemble
-    X_train_sr[:,4] = sigmas_cal_var
-    X_test_sr[:,4] = sigmas_test_var
+
+    for i, key in enumerate(sigmas_cal.keys()):
+        X_train_sr[:,i+1] = sigmas_cal[key]
+        X_test_sr[:,i+1] = sigmas_test[key]
+
     # TODO: information used by the Mondrian conformal predictors is not immediately
     # applicable, unless I use something about the bins? to be explored
     # finally, add the feature information from the original data set
-    # TODO: uncomment these two lines to also add the info on the features
     X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
     X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
 
@@ -279,19 +294,17 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     # need to change the fitness function! the fitness function is described
     # as a string (lines of Julia), imported from common.py
     ci_regressor = PySRRegressor(
-        tournament_selection_n=SR_TOURNAMENT_SELECTION_N,
-        # populations=1, # TODO this is just for debugging
-        population_size=SR_POPULATION_SIZE, # TODO this is just for debugging; must be >= topn (default 12)
-        niterations=SR_NITERATIONS,
-        # population_size=100, # TODO this is for the real experiments
-        # niterations=2000, # TODO this is also for the real experiments
-        binary_operators=SR_BINARY_OPERATORS,
-        unary_operators=SR_UNARY_OPERATORS,
+        tournament_selection_n=config.sr_tournament_selection_n,
+        population_size=config.sr_population_size, # must be >= topn (default 12)
+        niterations=config.sr_niterations,
+        binary_operators=config.sr_binary_operators,
+        unary_operators=config.sr_unary_operators,
         loss_function=loss_function_julia_penalize_smaller, # defined as a string in common.py
-        #variable_names = column_names + feature_names, # this one apparently does not work
         temp_equation_file=True, # does not clutter directory with temporary files
         verbosity=1, # can also be set to 0, it should be ok
         random_state=random_seed,
+        deterministic=True,
+        parallelism="serial"
         )
 
     print("Running symbolic regression...")
@@ -310,6 +323,11 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     # save the predictor as a pickle file
     with open(os.path.join(task_folder, "symbolic_regression_cp.pk"), "wb") as fp:
         pickle.dump(ci_regressor, fp)
+
+    # save the full list of SR feature names for this task (fixed synthetic
+    # columns + this dataset's own feature names, in the order used above)
+    with open(os.path.join(task_folder, "sr_features.json"), "w") as fp:
+        json.dump({"sr_features": list(sigmas_cal.keys()) + feature_names}, fp, indent=2)
 
     return ci_test
 
@@ -356,18 +374,10 @@ def evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
     plt.close(fig)
 
 
-def save_results_csv(results_dictionary, results_folder, results_csv_name):
-    """
-    Save the global dictionary of results as a checkpointed DataFrame/CSV.
-    """
-    df_results = pd.DataFrame.from_dict(results_dictionary)
-    df_results.to_csv(os.path.join(results_folder, results_csv_name), index=False)
-
-
-def run_experiment(random_seed=42):
+def run_experiment(config, random_seed = 42):
 
     # for each dataset
-    # - split training/calibration/test; 60/20/20 (no cross-validation)
+    # - split training/calibration/test
     # - test different conformal predictors
     #   -- regular conformal predictor
     #   -- normalized conformal predictors (N versioni)
@@ -378,19 +388,19 @@ def run_experiment(random_seed=42):
     #   -- plus feature values of the original problem
     #   -- plus (predicted?) value of the target?
 
-    # hard-coded variables
-    results_folder = "results-%d" % random_seed
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    results_folder = "results-%d_%s" % (random_seed, timestamp)
 
     # filtering warnings is usually bad, but here I am getting lots of annoying
     # FutureWarnings on stuff I cannot modify (it's inside other functions), so
     # I am going to filter them
-    warnings.simplefilter(action='ignore', category=FutureWarning)
+    # warnings.simplefilter(action='ignore', category=FutureWarning)
 
     # set up plotting
     sns.set_theme(style='darkgrid')
 
     # get task_id for all tasks in the benchmark suite
-    task_ids = get_benchmark_task_ids(SUITE_ID, TASKS_TOO_GOOD, TASKS_TOO_BAD)
+    task_ids = get_benchmark_task_ids(config.suite_id, config.tasks_too_good, config.tasks_too_bad)
 
     # create data structures to store the results
     results_dictionary = {
@@ -401,8 +411,9 @@ def run_experiment(random_seed=42):
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
-    # TODO remove this, it's just to progress the experiments
-    #task_ids = [361266, 361260]
+    # save experiment config for tracability
+    with open(os.path.join(results_folder, "config.json"), "w") as fp:
+            json.dump({**config.model_dump(), "random_seed": random_seed}, fp, indent=2)
 
     # start the loop, for every task
     for task_index, task_id in enumerate(task_ids):
@@ -410,70 +421,84 @@ def run_experiment(random_seed=42):
         # data structure for results related to this task
         task_results = {}
 
+        # placeholders to concatenate all sigmas for symbolic regression
+        sigmas_cal = {}
+        sigmas_test = {}
+
         # get the task
         (X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test,
          feature_names, dataset, task_folder) = prepare_task_data(
-             task_id, task_index, len(task_ids), results_folder, random_seed)
+             task_id, results_folder, random_seed)
 
         regressor, y_cal_pred, y_test_pred, r2_test = train_base_regressor(
-            X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_test, random_seed)
+            X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_test,
+            REGRESSOR_MODELS[config.predictor_model], config.predictor_params, random_seed)
 
-        task_results["conformal_predictor"] = compute_standard_conformal_intervals(
-            regressor, X_test, CONFIDENCE_LEVEL)
+        # Standard CP
+        task_results["conformal_predictor"] = regressor.predict_int(X_test, confidence=config.confidence_level)
 
         # now we need to access the wrapped learner to re-use it for the other
         # conformal predictors, but it's not difficult
         learner_prop = regressor.learner
 
+        # distance of KNN in feature space, default k=25
         print("Normalizing confidence intervals using KNN for difficulty estimation...")
         de_knn = DifficultyEstimator()
-        de_knn.fit(X=X_prop_train, scaler=True)
+        de_knn.fit(X=X_prop_train, k=config.ncp_knn_k, scaler=True)
         (intervals_norm_knn_dist, sigmas_cal_knn_dist, sigmas_test_knn_dist) = compute_normalized_intervals(
-            de_knn, learner_prop, X_cal, y_cal, X_test, CONFIDENCE_LEVEL)
-
+            de_knn, learner_prop, X_cal, y_cal, X_test, config.confidence_level)
+        
         task_results["normalized_cp_knn_dist"] = intervals_norm_knn_dist
+        sigmas_cal["knn_dist"] = sigmas_cal_knn_dist
+        sigmas_test["knn_dist"] = sigmas_test_knn_dist
 
-        # another way of estimating difficulty is by using standard deviations
+        # standard deviation of KNN in target space
         print("Now normalizing using standard deviations...")
         de_knn_std = DifficultyEstimator()
-        de_knn_std.fit(X=X_prop_train, y=y_prop_train, scaler=True)
+        de_knn_std.fit(X=X_prop_train, y=y_prop_train, k=config.ncp_knn_k, scaler=True)
         (intervals_norm_knn_std, sigmas_cal_knn_std, sigmas_test_knn_std) = compute_normalized_intervals(
-            de_knn_std, learner_prop, X_cal, y_cal, X_test, CONFIDENCE_LEVEL)
-
+            de_knn_std, learner_prop, X_cal, y_cal, X_test, config.confidence_level)
+        
         task_results["normalized_cp_knn_std"] = intervals_norm_knn_std
+        sigmas_cal["knn_std"] = sigmas_cal_knn_std
+        sigmas_test["knn_std"] = sigmas_test_knn_std
 
         # a third way of normalizing, using absolute residuals; it does not work
         # for XGBoost, because only Random Forest has out-of-bag predictions for
         # each individual learner...but it's a cool idea! maybe I should go back
         # and pick RandomForest as the estimator
-        if learner_prop.__class__.__name__ == "RandomForestRegressor":
+        if config.predictor_model == "RandomForestRegressor":
             print("Now normalizing using OOB predictions of each estimator...")
             oob_predictions = regressor.learner.oob_prediction_
             residuals_prop_oob = y_prop_train - oob_predictions
             de_knn_res = DifficultyEstimator()
-            de_knn_res.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True)
+            de_knn_res.fit(X=X_prop_train, residuals=residuals_prop_oob, k=config.ncp_knn_k, scaler=True)
             (intervals_norm_knn_res, sigmas_cal_knn_res, sigmas_test_knn_res) = compute_normalized_intervals(
-                de_knn_res, learner_prop, X_cal, y_cal, X_test, CONFIDENCE_LEVEL)
-
+                de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence_level)
+            
             task_results["normalized_cp_knn_res"] = intervals_norm_knn_res
+            sigmas_cal["knn_oob_res"] = sigmas_cal_knn_res
+            sigmas_test["knn_oob_res"] = sigmas_test_knn_res
 
         # a fourth way: using the variance of each element of the ensemble (!)
         # but we need to check whether XGBoost can actually deal with this;
         # update IT CAN'T, because the XGBoostRegressor object does not have
         # the ._regressor part
-        if learner_prop.__class__.__name__ == "RandomForestRegressor":
+        if config.predictor_model == "RandomForestRegressor":
             print("Now normalizing using variance of the estimators...")
             de_var = DifficultyEstimator()
             de_var.fit(X=X_prop_train, learner=learner_prop, scaler=True)
             (intervals_norm_var, sigmas_cal_var, sigmas_test_var) = compute_normalized_intervals(
-                de_var, learner_prop, X_cal, y_cal, X_test, CONFIDENCE_LEVEL)
-
+                de_var, learner_prop, X_cal, y_cal, X_test, config.confidence_level)
+            
             task_results["normalized_cp_norm_var"] = intervals_norm_var
+            sigmas_cal["ensemble_var"] = sigmas_cal_var
+            sigmas_test["ensemble_var"] = sigmas_test_var
 
         # Mondrian conformal regressor; in the original version, it is using
         # sigmas_cal_var, but for XGBoost I don't have it... :-D
         # so, in the end we ARE switching back to Random Forest
-        if learner_prop.__class__.__name__ == "RandomForestRegressor":
+        if config.predictor_model == "RandomForestRegressor":
             print("Now calibrating a Mondrian regressor...")
 
             # here we might need to perform a few iterations; basically Mondrian
@@ -482,7 +507,7 @@ def run_experiment(random_seed=42):
             # iterate until either the number of bins goes to 1, or until the
             # size of the confidence intervals is not infinite
             intervals_mond, number_of_bins = compute_mondrian_intervals(
-                learner_prop, de_var, X_prop_train, X_cal, y_cal, X_test, MAX_MONDRIAN_BINS)
+                learner_prop, de_var, X_prop_train, X_cal, y_cal, X_test, config.max_mondrian_bins)
 
             task_results["mondrian_cp"] = intervals_mond
             results_dictionary["mondrian_bins"].append(number_of_bins)
@@ -490,14 +515,9 @@ def run_experiment(random_seed=42):
         # proposed approach: symbolic regression intervals, using all sigmas
         ci_test = run_symbolic_regression(
             X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pred,
-            sigmas_cal_knn_dist, sigmas_test_knn_dist,
-            sigmas_cal_knn_std, sigmas_test_knn_std,
-            sigmas_cal_knn_res, sigmas_test_knn_res,
-            sigmas_cal_var, sigmas_test_var,
-            feature_names, task_folder, random_seed)
+            sigmas_cal, sigmas_test,
+            feature_names, task_folder, config, random_seed)
 
-        # store the results in the data structure that we used for the other
-        # methods
         task_results["symbolic_regression_cp"] = ci_test
 
         # post-processing of the results for the different confidence intervals
@@ -517,10 +537,9 @@ def run_experiment(random_seed=42):
         plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
         plt.close(fig)
 
-        # TODO save local copy of the results?
-
         # save global dictionary of results as DataFrame
-        save_results_csv(results_dictionary, results_folder, RESULTS_CSV_NAME)
+        df_results = pd.DataFrame.from_dict(results_dictionary)
+        df_results.to_csv(os.path.join(results_folder, config.results_csv_name), index=False)
 
     # and now, a global Pareto front plot
     fig, ax = plot_pareto([k for k in task_results], results_dictionary, translations=translations, all_results=True)
@@ -535,9 +554,28 @@ def run_experiment(random_seed=42):
 
 
 if __name__ == "__main__":
+    import argparse
+    from typing import get_origin
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="default_config.json",
+                         help="config file name inside the configs/ directory (default: default_config.json)")
+
+    # one CLI flag per config field, so any setting can be overwritten;
+    # unset flags default to None and are ignored by load_config
+    for name, model_field in Config.model_fields.items():
+        flag = "--" + name.replace("_", "-")
+        if name == "predictor_model":
+            parser.add_argument(flag, choices=list(REGRESSOR_MODELS))
+        elif get_origin(model_field.annotation) in (list, dict):
+            parser.add_argument(flag, type=json.loads, metavar="JSON",
+                                 help="JSON value, e.g. %s '[1, 2, 3]'" % flag)
+        else:
+            parser.add_argument(flag, type=model_field.annotation)
+
+    args = vars(parser.parse_args())
+    config = load_config(os.path.join(CONFIG_DIR, args.pop("config")), args)
 
     # let's run several experiments in a row, with different random seeds
-    # random_seeds = [i*10 + 2 for i in range(5, 34)]
-    random_seeds = [52] # uncomment this line for just one repetition
-    for random_seed in random_seeds:
-        run_experiment(random_seed)
+    for random_seed in config.random_seeds:
+        run_experiment(config, random_seed)
