@@ -25,12 +25,15 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.svm import SVR
 
 from xgboost import XGBRegressor
 
 from pysr import PySRRegressor
 
 from pydantic import BaseModel, Field, field_validator
+from typing_extensions import Any
 
 # local library
 from common import (load_and_preprocess_openml_task, plot_confidence_intervals,
@@ -39,7 +42,11 @@ from common import (load_and_preprocess_openml_task, plot_confidence_intervals,
 # regressor models selectable via the "predictor_model" config key or --predictor-model overwrite
 REGRESSOR_MODELS = {
     "RandomForestRegressor": RandomForestRegressor,
-    "XGBRegressor": XGBRegressor
+    "XGBRegressor": XGBRegressor,
+    "SVR": SVR,
+    "LinearRegression": LinearRegression,
+    "Ridge": Ridge,
+    "Lasso": Lasso
 }
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
@@ -54,13 +61,14 @@ class Config(BaseModel):
     results_csv_name: str
     confidence_level: float = Field(gt=0)
     predictor_model: str
-    predictor_params: dict # at the moment, params are always those for random forests, might need better solution later
+    predictor_params : dict[str, Any] # at the moment, params are always those for random forests, might need better solution later
     ncp_knn_k: int = Field(gt=0)
     sr_tournament_selection_n: int = Field(gt=0, default=15)
     sr_population_size: int = Field(ge=12) # must be >= topn (default 12)
     sr_niterations: int = Field(gt=0)
     sr_binary_operators: list[str]
     sr_unary_operators: list[str]
+    use_alt_mondrian: bool = Field(default=False)
 
     @field_validator("predictor_model")
     @classmethod
@@ -157,7 +165,10 @@ def train_base_regressor(X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_tes
     calibrate the standard conformal predictor.
     """
     print("Training regressor...")
-    regressor = WrapRegressor(regressor_class(random_state=random_seed, **regressor_params))
+    base_regressor = regressor_class(**regressor_params)
+    if "random_state" in base_regressor.get_params():
+         base_regressor.set_params(random_state=random_seed)
+    regressor = WrapRegressor(base_regressor)
     regressor.fit(X_prop_train, y_prop_train)
 
     # get predictions for the test set and calibration set from the learner
@@ -378,7 +389,7 @@ def run_experiment(config, random_seed = 42):
 
     # create data structures to store the results
     results_dictionary = {
-        'task_id' : [], 'dataset_name' : [], 'r2' : [], 'mondrian_bins' : [],
+        'task_id' : [], 'dataset_name' : [], 'r2' : [],
                           }
 
     # prepare directory for the results
@@ -473,13 +484,28 @@ def run_experiment(config, random_seed = 42):
         # sigmas_cal_var, but for XGBoost I don't have it... :-D
         # so, in the end we ARE switching back to Random Forest
         if config.predictor_model == "RandomForestRegressor":
-            print("Now calibrating a Mondrian regressor...")
+            print("Now calibrating a Mondrian regressor using ensemble variance score...")
 
             intervals_mond, number_of_bins = compute_mondrian_intervals(
                 learner_prop, de_var, sigmas_cal_var, X_cal, y_cal, X_test,
                 config.confidence_level, random_seed)
 
             task_results["mondrian_cp"] = intervals_mond
+            if "mondrian_bins" not in results_dictionary:
+                            results_dictionary["mondrian_bins"] = []
+            results_dictionary["mondrian_bins"].append(number_of_bins)
+
+        # Experiment using KNN distance instead of Random Forest variance for binning
+        elif config.use_alt_mondrian:
+            print("Now calibrating a Mondrian regressor using KNN distance...")
+
+            intervals_mond, number_of_bins = compute_mondrian_intervals(
+                learner_prop, de_knn, sigmas_cal_knn_dist, X_cal, y_cal, X_test,
+                config.confidence_level, random_seed)
+
+            task_results["mondrian_cp"] = intervals_mond
+            if "mondrian_bins" not in results_dictionary:
+                                        results_dictionary["mondrian_bins"] = []
             results_dictionary["mondrian_bins"].append(number_of_bins)
 
         # proposed approach: symbolic regression intervals, using all sigmas
