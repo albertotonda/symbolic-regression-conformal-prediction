@@ -15,12 +15,11 @@ import json
 import pandas as pd
 import pickle
 import seaborn as sns
-import warnings
 
 from datetime import datetime
 
 from crepes import WrapRegressor
-from crepes.extras import MondrianCategorizer, DifficultyEstimator
+from crepes.extras import DifficultyEstimator, binning
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score
@@ -54,7 +53,6 @@ class Config(BaseModel):
     tasks_too_bad: list[int]
     results_csv_name: str
     confidence_level: float = Field(gt=0)
-    max_mondrian_bins: int = Field(gt=1)
     predictor_model: str
     predictor_params: dict # at the moment, params are always those for random forests, might need better solution later
     ncp_knn_k: int = Field(gt=0)
@@ -193,62 +191,38 @@ def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confide
     return intervals, sigmas_cal, sigmas_test
 
 
-def compute_mondrian_intervals(learner_prop, de_var, X_prop_train, X_cal, y_cal, X_test, max_bins):
+def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_cal,
+                                X_test, confidence, random_seed):
     """
-    Calibrate a Mondrian conformal regressor. Mondrian conformal predictors
-    only work if there are enough values to bin; but "enough values" is
-    dependent on the number of bins, so we iterate, reducing the number of
-    bins, until either it works or the number of bins goes down to 1.
+    Calibrate a Mondrian conformal regressor. Bin boundaries are computed
+    directly from the calibration set's own ensemble-variance difficulty
+    scores (sigmas_cal_var, itself just an inference output of the
+    already-fitted learner, so no leakage), using the largest number of
+    equal-sized bins for which every bin is guaranteed to hold at least the
+    minimum number of calibration points required for a finite conformal
+    quantile at this confidence level (crepes.extras.binning's min_size
+    parameter). This removes the need to iterate/retry on undersized bins.
     """
-    number_of_bins = max_bins
-    keep_iterating = True
+    # minimal number of data points per bin is n >= 1/(1-confidence) - 1;
+    # +1 as a safety margin, since crepes' own check on the calibration side
+    # (base.py: int((1-confidence)*(n+1))-1 >= 0) can trip at the exact
+    # boundary count due to floating-point rounding of (1-confidence) for
+    # typical confidence levels (e.g. 1-0.9 != 0.1 exactly in binary float)
+    min_points = int(1 / (1-confidence) - 1) + 1
 
-    while keep_iterating and number_of_bins > 1:
+    # MondrianCategorizer doesn't expose the "min_size" attribute, so compute manually instead
+    _, bin_thresholds = binning(sigmas_cal_var, min_size=min_points, seed=random_seed)
+    number_of_bins = len(bin_thresholds) - 1
+    print(f"Number of Mondrian bins: {number_of_bins}")
 
-        # capture a warning that can happen during binning
-        with warnings.catch_warnings(record=True):
-            # this line makes raising warning the same as raising exceptions
-            warnings.simplefilter("error")
+    # the "mc" argument for calibrate() internally takes X as only parameter,
+    # so recompute sigmas_var = de_var.apply(X) instead of using pre-computed ones
+    def mondrian_categories(X):
+        return binning(de_var.apply(X), bins=bin_thresholds, seed=random_seed)
 
-            try:
-                # bins_cal, bin_thresholds = binning(sigmas_cal_var, bins=number_of_bins)
-                # regressor_mond = WrapRegressor(learner_prop)
-                # regressor_mond.calibrate(X_cal, y_cal, bins=bins_cal)
-
-                # bins_test = binning(sigmas_test_var, bins=bin_thresholds)
-                # intervals_mond = regressor_mond.predict_int(X_test, bins=bins_test)
-
-                # keep_iterating = False
-                mc = MondrianCategorizer()
-                mc.fit(X=X_prop_train, de=de_var, no_bins=number_of_bins)
-                regressor_mond = WrapRegressor(learner_prop)
-                regressor_mond.calibrate(X_cal, y_cal, mc=mc)
-                intervals_mond = regressor_mond.predict_int(X_test)
-                keep_iterating = False
-
-            # TODO: check if condition is still valid
-            except UserWarning as w:
-                print(w)
-                print("UserWarning raised, the bins do not contain enough samples, retrying...")
-                number_of_bins -= 1
-
-        # check: if the confidence intervals do not contain any '-inf', '+inf'
-        # we stop; otherwise, reduce number of bins and iterate
-        # TODO: now, this does not work as intended, because some of the bins
-        # might be empty (!) so in the conformal set we will have no
-        # infinite confidence intervals, but they might appear in the test set;
-        # the code below does not work, the proper way of dealing with this
-        # is instead to capture the UserWarning as an error, and act
-        # accordingly; see the code above for catching UserWarning
-
-        #if np.isfinite(intervals_mond).any() :
-        #    keep_iterating = False
-        #    print("Found non-infinite confidence intervals for Mondrian conformal predictors for %d bins, stopping" %
-        #          number_of_bins)
-        #else :
-        #    print("Found infinite confidence intervals for Mondrian conformal predictor at %d bins, iterating..."
-        #          % number_of_bins)
-        #    number_of_bins -= 1
+    regressor_mond = WrapRegressor(learner_prop)
+    regressor_mond.calibrate(X_cal, y_cal, mc=mondrian_categories)
+    intervals_mond = regressor_mond.predict_int(X_test, confidence=confidence)
 
     return intervals_mond, number_of_bins
 
@@ -501,13 +475,9 @@ def run_experiment(config, random_seed = 42):
         if config.predictor_model == "RandomForestRegressor":
             print("Now calibrating a Mondrian regressor...")
 
-            # here we might need to perform a few iterations; basically Mondrian
-            # conformal predictors only work if there are enough values to bin;
-            # but "enough values" is dependent on the number of bins, so we can
-            # iterate until either the number of bins goes to 1, or until the
-            # size of the confidence intervals is not infinite
             intervals_mond, number_of_bins = compute_mondrian_intervals(
-                learner_prop, de_var, X_prop_train, X_cal, y_cal, X_test, config.max_mondrian_bins)
+                learner_prop, de_var, sigmas_cal_var, X_cal, y_cal, X_test,
+                config.confidence_level, random_seed)
 
             task_results["mondrian_cp"] = intervals_mond
             results_dictionary["mondrian_bins"].append(number_of_bins)
