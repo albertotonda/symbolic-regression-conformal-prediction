@@ -5,11 +5,10 @@ Created on Fri May  3 10:03:52 2024
 @author: Alberto
 """
 
-import openml
 import numpy as np
+import openml
 import pandas as pd
 import random
-import sys
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error
@@ -18,25 +17,26 @@ from sklearn.preprocessing import StandardScaler
 
 from xgboost import XGBRegressor
 
+# run as `python -m analysis.statistics_openml_ctr23` from src/, so src/ (this
+# module's parent) is on sys.path and sibling modules import flatly
+from data import load_and_preprocess_openml_task
+
 if __name__ == "__main__" :
-    
+
     # hard-coded variables
     random_seed = 42
     use_predefined_splits = False
     prng = random.Random() # pseudo-random number generator will be useful later
     prng.seed(random_seed)
     regressor_classes = [RandomForestRegressor, XGBRegressor]
-    
+
     # load CTR23 regression benchmark suite
     suite = openml.study.get_suite(353)
-    
+
     # get all task_ids, so that if there is a crash we can easily restart
     # by skipping the first results
     task_ids = [t for t in suite.tasks]
-    
-    # this is for DEBUGGING, let's see if we get a better performance with normalization
-    #task_ids = [361244, 361618, 361619, 361269, 361261, 361243]
-    
+
     # prepare data structure to store information
     statistics_dictionary = {'task_id' : [], 'dataset_name' : [], 'target_name': [], 'n_samples' : [],
                              'n_features' : [], 'missing_data' : [], 'categorical_features' : [],}
@@ -46,41 +46,23 @@ if __name__ == "__main__" :
         statistics_dictionary['MSE_' + regressor_class.__name__] = []
     
     for task_id in task_ids :
-        
+
         print("Now working on task %d..." % task_id)
-        task = openml.tasks.get_task(task_id, download_splits=True)
-        
-        # the 'task' object above contains a lot of useful information,
-        # like the name of the target variable and the id of the dataset
-        df_X, df_y = task.get_X_and_y('dataframe')
-        
-        # check if there is any missing value
+
+        # descriptive stats (missing data, categorical columns) are computed
+        # from the raw data, since load_and_preprocess_openml_task returns
+        # data that's already been cleaned/encoded
+        raw_task = openml.tasks.get_task(task_id, download_splits=True)
+        df_X_raw, df_y_raw = raw_task.get_X_and_y('dataframe')
         # here below there is a sum().sum() because it is adding up missing values
         # in rows AND THEN in columns
-        missing_data = df_X.isnull().sum().sum() + df_y.isnull().sum()
-        
-        if missing_data > 0 :
-            # we actually have to go with a task/dataset-specific correction
-            if task_id == 361268 :
-                # this task has several columns with A LOT of missing data,
-                # so we are just going to drop them
-                df_X.dropna(axis=1, inplace=True)
-            elif task_id == 361616 :
-                # again, a few columns with 800/1200 missing values, get dropped
-                df_X.dropna(axis=1, inplace=True)
-        
-        # check if there are any categorical columns
-        df_categorical = df_X.select_dtypes(include=['category', 'object'])
-        categorical_features = df_categorical.shape[1]
-        
-        # convert categorical columns to numerical values
-        for c in df_categorical.columns :
-            df_X[c] = df_X[c].astype('category') # double-check that it is treated as a categorical column
-            df_X[c] = df_X[c].cat.codes # replace values with category codes (automatically computed)
-        
+        missing_data = df_X_raw.isnull().sum().sum() + df_y_raw.isnull().sum()
+        categorical_features = df_X_raw.select_dtypes(include=['category', 'object']).shape[1]
+
+        df_X, df_y, task = load_and_preprocess_openml_task(task_id)
         X = df_X.values
         y = df_y.values
-        
+
         # let's also get the name of the dataset
         dataset = task.get_dataset()
         print("Task %d is applied to data set \"%s\" (id=%d)" % (task_id, dataset.name, dataset.dataset_id))
@@ -151,5 +133,3 @@ if __name__ == "__main__" :
         
         df_statistics = pd.DataFrame.from_dict(statistics_dictionary)
         df_statistics.to_csv("OpenML-CTR23-statistics.csv", index=False)
-        
-        #sys.exit(0)

@@ -10,7 +10,7 @@
     "ncp_knn_k": 25,
     "sr_tournament_selection_n": 1,
     "sr_population_size": 12,
-    "sr_niterations": 50,
+    "sr_niterations": 2,
     "sr_binary_operators": ["+", "-", "*", "/"],
     "sr_unary_operators": ["sin", "cos", "log", "exp"]
 }

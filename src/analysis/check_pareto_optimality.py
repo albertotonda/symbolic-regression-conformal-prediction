@@ -8,13 +8,13 @@ a few methods (so, just a few points in a 2D space).
 @author: Alberto
 """
 
-import os 
+import argparse
+import os
 import pandas as pd
-import sys
 
 
 def is_dominated(considered_point, other_point) :
-    
+
     # first fitness is median, smaller is better; second fitness is coverage, larger is better
     if considered_point[0] >= other_point[0] and considered_point[1] <= other_point[1] :
         return True
@@ -23,13 +23,17 @@ def is_dominated(considered_point, other_point) :
 
 
 if __name__ == "__main__" :
-    
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("results_folder",
+                         help="directory containing the results.csv produced by run_experiments.py")
+    args = parser.parse_args()
+
     # hard-coded values
     fitness_1_name = "_coverage"
     fitness_2_name = "_median"
-    
-    #results_folder = "../results/2024-06-07-full-results/"
-    results_folder = "../results/2024-06-17-full-results/results-52"
+
+    results_folder = args.results_folder
     results_file = "results.csv"
     df = pd.read_csv(os.path.join(results_folder, results_file))
     
