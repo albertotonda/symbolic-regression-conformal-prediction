@@ -6,6 +6,8 @@ regressors (one per difficulty-estimation strategy), and Mondrian conformal
 regressors.
 """
 
+import numpy as np
+
 from crepes import WrapRegressor
 from crepes.extras import DifficultyEstimator, binning
 
@@ -124,17 +126,35 @@ def select_mondrian_source(config, difficulty_estimators, sigmas_cal):
     return None
 
 
+def _find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed):
+    """
+    crepes.extras.binning's min_size parameter requests bins=len(values)//
+    min_size equal-frequency bins, but with tied/duplicated difficulty
+    scores (common for the ensemble-variance estimator) pd.qcut can still
+    leave a handful of bins a few points short of min_size. So, rather than
+    trusting the requested bin count outright, verify the actual per-bin
+    counts and back off the number of bins until every one of them holds at
+    least min_points calibration points.
+    """
+    number_of_bins = len(sigmas_cal_var) // min_points
+    while number_of_bins > 1:
+        assigned_bins, bin_thresholds = binning(
+            sigmas_cal_var, bins=number_of_bins, seed=random_seed)
+        counts = np.bincount(assigned_bins.astype(int))
+        if counts.min() >= min_points:
+            return bin_thresholds
+        number_of_bins -= 1
+    return np.array([-np.inf, np.inf])
+
+
 def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_cal,
                                 X_test, confidence, random_seed):
     """
     Calibrate a Mondrian conformal regressor. Bin boundaries are computed
     directly from the calibration set's own ensemble-variance difficulty
-    scores (sigmas_cal_var, itself just an inference output of the
-    already-fitted learner, so no leakage), using the largest number of
-    equal-sized bins for which every bin is guaranteed to hold at least the
-    minimum number of calibration points required for a finite conformal
-    quantile at this confidence level (crepes.extras.binning's min_size
-    parameter). This removes the need to iterate/retry on undersized bins.
+    scores, using the largest number of equal-sized bins for which every 
+    bin actually holds at least the minimum number of calibration points 
+    required for a finite conformal quantile at this confidence level.
     """
     # minimal number of data points per bin is n >= 1/(1-confidence) - 1;
     # +1 as a safety margin, since crepes' own check on the calibration side
@@ -143,8 +163,7 @@ def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_ca
     # typical confidence levels (e.g. 1-0.9 != 0.1 exactly in binary float)
     min_points = int(1 / (1-confidence) - 1) + 1
 
-    # MondrianCategorizer doesn't expose the "min_size" attribute, so compute manually instead
-    _, bin_thresholds = binning(sigmas_cal_var, min_size=min_points, seed=random_seed)
+    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
