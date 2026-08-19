@@ -11,3 +11,5 @@ src/xgboost_OpenML-CTR23-statistics.csv
 /results*
 /src/results*
 AGENTS.md
+requirements.in
+.venv
