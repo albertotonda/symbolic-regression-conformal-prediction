@@ -26,15 +26,17 @@ def setup_results_folder(prefix, random_seed):
 
 
 # this is used to translate internal naming convention to readable strings
-# for the plots
+# for the plots; methods with no entry here just fall back to their raw key
+# (see plot_pareto/evaluate_and_plot_method below). Both run_interval_sr.py
+# and experiments/run_sigma_sr.py use this same key naming.
 translations = {
     "conformal_predictor" : "Standard conformal predictor",
-    "normalized_cp_knn_dist" : "CP with intervals normalized using KNN on distance",
-    "normalized_cp_knn_std" : "CP with intervals normalized using KNN on standard deviation",
-    "normalized_cp_knn_res" : "CP with intervals normalized using KNN on OOB residuals",
-    "normalized_cp_norm_var" : "CP with intervals normalized using variance of ensemble predictors",
+    "normalized_cp_knn_dist" : "CP normalized using KNN on distance",
+    "normalized_cp_knn_std" : "CP normalized using KNN on standard deviation",
+    "normalized_cp_knn_res" : "CP normalized using KNN on OOB residuals",
+    "normalized_cp_norm_var" : "CP normalized using variance of ensemble predictors",
     "mondrian_cp" : "Mondrian CP",
-    "symbolic_regression_cp" : "Symbolic Regression CP"
+    "symbolic_regression_cp" : "Symbolic Regression CP",
     }
 
 def plot_confidence_intervals(y, y_pred, y_pred_ci) :
@@ -84,7 +86,7 @@ def plot_pareto(methods, results_dictionary, translations=None, all_results=Fals
             y = y[-1]
 
         if translations is not None :
-            method = translations[method]
+            method = translations.get(method, method)
 
         ax.scatter(x, y, label=method)
 
@@ -125,7 +127,7 @@ def evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
     fig, ax = plot_confidence_intervals(y_test[:20], y_test_pred[:20],
                                         confidence_intervals[:20])
 
-    title = "%s on data set \"%s\" (coverage=%.4f, median=%.2f)" % (translations[method], dataset.name, coverage, ci_amplitude_median)
+    title = "%s on data set \"%s\" (coverage=%.4f, median=%.2f)" % (translations.get(method, method), dataset.name, coverage, ci_amplitude_median)
     ax.set_title(title)
 
     plt.savefig(os.path.join(task_folder, method + ".png"), dpi=300)

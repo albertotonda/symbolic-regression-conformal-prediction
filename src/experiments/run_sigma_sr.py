@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import jinja2
 
-from crepes import WrapRegressor
+from collections import defaultdict
+
+from crepes import WrapRegressor, ConformalRegressor
 from crepes.extras import DifficultyEstimator, MondrianCategorizer, binning
 
 from sklearn.ensemble import RandomForestRegressor
@@ -27,10 +29,12 @@ from pysr import PySRRegressor
 # make src/ (this file's parent's parent) importable, so this script can be
 # run directly (e.g. `uv run src/experiments/run_sigma_sr.py`) regardless of
 # the current working directory
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 from data import load_and_preprocess_openml_task, get_benchmark_task_ids
-from evaluate import plot_confidence_intervals, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, plot_pareto, setup_results_folder, translations
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 sns.set_theme(style='darkgrid')
@@ -58,6 +62,10 @@ confidence = 0.95
 # results-sigma-sr-<seed>_<timestamp>/<dataset_name>/..., same structure as
 # run_interval_sr.py's results folder
 results_folder = setup_results_folder("sigma-sr", random_seed)
+
+# accumulated across all tasks, same as run_interval_sr.py's results_dictionary
+results_dictionary = defaultdict(list, {"task_id": [], "dataset_name": [], "r2": []})
+last_task_methods = []
 
 for task_id in task_ids:
 
@@ -184,37 +192,37 @@ for task_id in task_ids:
     # Standard CP
     print("Computing CI for SCP...")
     base_regressor.calibrate(X_cal, y_cal)
-    sigmas["scp"] = np.ones(len(X_cal))
-    conf_intervals["scp"] = base_regressor.predict_int(X_test, confidence=confidence)
+    sigmas["conformal_predictor"] = np.ones(len(X_cal))
+    conf_intervals["conformal_predictor"] = base_regressor.predict_int(X_test, confidence=confidence)
 
     # KNN distance
     print("Computing CI for knn_dist NCP...")
     de_knn_dist = DifficultyEstimator()
     de_knn_dist.fit(X=X_prop_train, scaler=True)
-    conf_intervals["knn_dist"], sigmas["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, confidence)
+    conf_intervals["normalized_cp_knn_dist"], sigmas["normalized_cp_knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # KNN std
     print("Computing CI for knn_std NCP...")
     de_knn_std = DifficultyEstimator()
     de_knn_std.fit(X=X_prop_train, y=y_prop_train, scaler=True)
-    conf_intervals["knn_std"], sigmas["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, confidence)
+    conf_intervals["normalized_cp_knn_std"], sigmas["normalized_cp_knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # KNN out-of-bag residuals
     print("Computing CI for knn_res NCP...")
     de_knn_res = DifficultyEstimator()
     de_knn_res.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True)
-    conf_intervals["knn_res"], sigmas["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, confidence)
+    conf_intervals["normalized_cp_knn_res"], sigmas["normalized_cp_knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # Random Forest variance
     print("Computing CI for var NCP...")
     de_var = DifficultyEstimator()
     de_var.fit(X=X_prop_train, learner=learner_prop, scaler=True)
-    conf_intervals["var"], sigmas["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, confidence)
+    conf_intervals["normalized_cp_norm_var"], sigmas["normalized_cp_norm_var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # Mondrian CP using variance
     print("Computing CI for MCP...")
     min_points = int(1 / (1-confidence) - 1) + 1
-    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas["var"], min_points, random_seed)
+    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas["normalized_cp_norm_var"], min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
@@ -225,8 +233,8 @@ for task_id in task_ids:
 
     regressor_mond = WrapRegressor(learner_prop)
     regressor_mond.calibrate(X_cal, y_cal, mc=mondrian_categories)
-    sigmas["mondrian"] = np.ones(len(X_cal))
-    conf_intervals["mondrian"]= regressor_mond.predict_int(X_test, confidence=confidence)
+    sigmas["mondrian_cp"] = np.ones(len(X_cal))
+    conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=confidence)
 
     # ## 5. Symbolic Regression as an estimator for sigma(x)
     #
@@ -237,6 +245,7 @@ for task_id in task_ids:
     # out-of-bag predictions.
 
     # ### 5.1. Computing all NPS sigma on OOB predictions
+    print("Computing NCP sigmas for data augmentation...")
     sigmas_train = {}
     sigmas_cal = {}
     sigmas_test = {}
@@ -326,8 +335,6 @@ for task_id in task_ids:
         # ("gaussian_nll", dict(loss_function=gaussian_nll_loss_julia), y_raw_residual),
     ]
 
-    from crepes import ConformalRegressor
-
     for loss_name, loss_kwargs, y_train_sr in sigma_losses:
         sigma_predictor = PySRRegressor(
             model_selection="best",
@@ -343,6 +350,7 @@ for task_id in task_ids:
             **loss_kwargs,
         )
         sigma_predictor.fit(X_train_sr, y_train_sr)
+        print(f"[{loss_name}] chosen SR expression: {sigma_predictor.sympy()}")
 
         de_sr = DifficultyEstimator()
         de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.predict(X)), scaler=True)
@@ -362,38 +370,32 @@ for task_id in task_ids:
             learner_prop.predict(X_test), sigmas=sigmas_test_sr, confidence=confidence
         )
         sigmas[cp_key] = sigmas_cal_sr
-        print(f"[{loss_name}] chosen SR expression: {sigma_predictor.sympy()}")
 
-    results = {}
-    for cp in sigmas.keys():
-        results[cp] = {}
-        results[cp]["mean"] = np.mean((conf_intervals[cp][:,1] - conf_intervals[cp][:,0]))
-        results[cp]["median"] = np.median((conf_intervals[cp][:,1] - conf_intervals[cp][:,0]))
-        # this expression below is a bit of a mess, but it's 1 if the measured
-        # value falls within the confidence intervals, and 0 otherwise (summed up, divided by n_samples)
-        results[cp]["coverage"] = np.sum([1 if (y_test[i] >= conf_intervals[cp][i,0] and
-                                y_test[i] <= conf_intervals[cp][i,1]) else 0
-                        for i in range(len(y_test))])/len(y_test)
+    # per-method CI plot + coverage/amplitude stats, same helper
+    # run_interval_sr.py uses (stats get appended into results_dictionary)
+    for method, intervals in conf_intervals.items():
+        evaluate_and_plot_method(method, intervals, y_test, y_test_pred,
+                                  dataset, task_folder, results_dictionary)
 
-        print(f"{cp.upper()}\n|-- CI mean: {results[cp]["mean"]}\tCI median: {results[cp]["median"]}\tCoverage: {results[cp]["coverage"]}")
+    results_dictionary["task_id"].append(task_id)
+    results_dictionary["dataset_name"].append(dataset.name)
+    results_dictionary["r2"].append(r2)
+    last_task_methods = list(conf_intervals.keys())
 
-    fig, ax = plt.subplots(figsize=(10,8))
-
-    for cp in results.keys():
-
-        # get the information related to coverage
-        x = results[cp]["coverage"]
-
-        # get information on median (or mean)
-        y = results[cp]["median"]
-
-        ax.scatter(x, y, label=cp)
-
-    # invert x-axis, so that the plot is more readable
-    ax.invert_xaxis()
-
-    ax.set_xlabel("coverage on the test set")
-    ax.set_ylabel("median amplitude of the confidence intervals")
-    ax.legend(loc='best')
-    plt.savefig(os.path.join(task_folder, "pareto.png"))
+    # per-task Pareto plot across all methods computed for this task
+    fig, ax = plot_pareto(last_task_methods, results_dictionary, translations=translations)
+    ax.set_title(f"Performance of conformal prediction methods on dataset \"{dataset.name}\"")
+    plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
     plt.close(fig)
+
+# %% [markdown]
+# ## 6. Save results and plot the global Pareto front, across all tasks
+
+# %%
+df_results = pd.DataFrame.from_dict(results_dictionary)
+df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
+
+fig, ax = plot_pareto(last_task_methods, results_dictionary, translations=translations, all_results=True)
+ax.set_title("Performance of conformal prediction methods on selected CTR-23 datasets")
+plt.savefig(os.path.join(results_folder, "pareto.png"), dpi=300)
+plt.close(fig)
