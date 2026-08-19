@@ -41,7 +41,7 @@ from pysr import PySRRegressor
 
 from config import REGRESSOR_MODELS, parse_cli_config, save_config_snapshot
 from data import get_benchmark_task_ids, prepare_task_data
-from evaluate import evaluate_and_plot_method, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +302,7 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
 
     print("Running symbolic regression...")
     ci_regressor.fit(X_train_sr, y_train_sr)
+    log_equations(ci_regressor, task_folder, "symbolic_regression_cp")
 
     print("Now computing confidence intervals for conformal set...")
     ci_amplitude_cal = ci_regressor.predict(X_train_sr)

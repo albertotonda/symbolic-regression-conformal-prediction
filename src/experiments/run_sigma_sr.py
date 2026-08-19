@@ -34,7 +34,7 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from data import load_and_preprocess_openml_task, get_benchmark_task_ids
-from evaluate import evaluate_and_plot_method, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 sns.set_theme(style='darkgrid')
@@ -349,7 +349,7 @@ for task_id in task_ids:
             **loss_kwargs,
         )
         sigma_predictor.fit(X_train_sr, y_train_sr)
-        print(f"[{loss_name}] chosen SR expression: {sigma_predictor.sympy()}")
+        log_equations(sigma_predictor, task_folder, f"symbolic_regression_{loss_name}")
 
         de_sr = DifficultyEstimator()
         de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.predict(X)), scaler=True)
