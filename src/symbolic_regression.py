@@ -115,6 +115,8 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     print("Now computing confidence intervals for conformal set...")
     ci_amplitude_cal = ci_regressor.predict(X_train_sr)
 
+    print(f"Number of CI with undercoverage in calibration set: {sum(ci_amplitude_cal < y_train_sr)}")
+
     print("And computing confidence intervals for test set...")
     ci_amplitude_test = ci_regressor.predict(X_test_sr)
     ci_test = np.zeros((y_test.shape[0], 2))
