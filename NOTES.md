@@ -113,8 +113,8 @@ Revisited idea #4 (SR-predicted difficulty estimator) in detail.
   alongside knn_oob_res/ensemble_var in fit_difficulty_estimators; gate by
   dataset size/dimensionality; compare against the existing direct-bound SR
   predictor and the paper's SRCP baselines on interval efficiency and
-  held-out coverage (not in-sample, unlike the current check at
-  symbolic_regression.py:118).
+  held-out coverage (not in-sample, unlike the current check in
+  run_symbolic_regression, pipeline.py).
 
 ### 2024-06-04
 We should probably go for a RandomForest with 500 trees.

@@ -6,8 +6,24 @@ statistics and plots used to compare conformal prediction methods.
 
 import os
 
+from datetime import datetime
+
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+def setup_results_folder(prefix, random_seed):
+    """
+    Create (and return the path to) a fresh timestamped results folder,
+    named results-<prefix>-<random_seed>_<timestamp>, in the current
+    working directory.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    results_folder = "results-%s-%d_%s" % (prefix, random_seed, timestamp)
+    if not os.path.exists(results_folder):
+        os.makedirs(results_folder)
+    return results_folder
+
 
 # this is used to translate internal naming convention to readable strings
 # for the plots

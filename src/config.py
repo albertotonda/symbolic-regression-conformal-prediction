@@ -46,7 +46,6 @@ class Config(BaseModel):
     sr_niterations: int = Field(gt=0)
     sr_binary_operators: list[str]
     sr_unary_operators: list[str]
-    use_alt_mondrian: bool = Field(default=False)
 
     @field_validator("predictor_model")
     @classmethod
@@ -54,6 +53,12 @@ class Config(BaseModel):
         if v not in REGRESSOR_MODELS:
             raise ValueError("must be one of %s" % list(REGRESSOR_MODELS))
         return v
+
+
+def save_config_snapshot(config, random_seed, results_folder):
+    """Save the experiment config (plus random seed) into results_folder, for traceability."""
+    with open(os.path.join(results_folder, "config.json"), "w") as fp:
+        json.dump({**config.model_dump(), "random_seed": random_seed}, fp, indent=2)
 
 
 def load_config(config_path, cli_overrides=None):

@@ -5,6 +5,7 @@
 # ## 0. Imports & Setup
 
 # %%
+import os
 import sys
 import warnings
 import numpy as np
@@ -23,8 +24,13 @@ from sklearn.preprocessing import StandardScaler
 
 from pysr import PySRRegressor
 
+# make src/ (this file's parent's parent) importable, so this script can be
+# run directly (e.g. `uv run src/experiments/run_sigma_sr.py`) regardless of
+# the current working directory
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data import load_and_preprocess_openml_task, get_benchmark_task_ids
-from evaluate import plot_confidence_intervals, plot_pareto, translations
+from evaluate import plot_confidence_intervals, plot_pareto, setup_results_folder, translations
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 sns.set_theme(style='darkgrid')
@@ -49,11 +55,17 @@ task_ids = [id for id in task_ids if id not in TASKS_TOO_BAD and id not in TASKS
 random_seed = 42
 confidence = 0.95
 
+# results-sigma-sr-<seed>_<timestamp>/<dataset_name>/..., same structure as
+# run_interval_sr.py's results folder
+results_folder = setup_results_folder("sigma-sr", random_seed)
+
 for task_id in task_ids:
 
     # ## 1. Load & Explore a Dataset
     df_X, df_y, task = load_and_preprocess_openml_task(task_id)
     dataset = task.get_dataset()
+    task_folder = os.path.join(results_folder, dataset.name)
+    os.makedirs(task_folder, exist_ok=True)
 
     print(f"Dataset  : {dataset.name}")
     print(f"Samples  : {df_X.shape[0]}")
@@ -65,7 +77,7 @@ for task_id in task_ids:
     ax.set_xlabel('Target value')
     ax.set_ylabel('Count')
     ax.set_title(f"Distribution of target in '{dataset.name}'")
-    plt.savefig(f"src/{dataset.name}.png")
+    plt.savefig(os.path.join(task_folder, "target_distribution.png"))
     plt.close(fig)
 
     # ## 2. Split & Normalize
@@ -383,5 +395,5 @@ for task_id in task_ids:
     ax.set_xlabel("coverage on the test set")
     ax.set_ylabel("median amplitude of the confidence intervals")
     ax.legend(loc='best')
-    plt.savefig(f"src/pareto_{dataset.name}.png")
+    plt.savefig(os.path.join(task_folder, "pareto.png"))
     plt.close(fig)
