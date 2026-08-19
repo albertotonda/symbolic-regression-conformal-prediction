@@ -50,11 +50,10 @@ print('All imports OK')
 # pinball/quantile loss, a scale-invariant log-variance loss, and Gaussian
 # NLL.
 
-# %%
-task_ids = get_benchmark_task_ids(353, [], [])
+# %%*
 TASKS_TOO_GOOD = [361236, 361247, 361252, 361254, 361256, 361257, 361268, 361617]
 TASKS_TOO_BAD = [361243, 361244, 361261, 361618, 361619]
-task_ids = [id for id in task_ids if id not in TASKS_TOO_BAD and id not in TASKS_TOO_GOOD]
+task_ids = get_benchmark_task_ids(353, TASKS_TOO_GOOD, TASKS_TOO_BAD)
 
 random_seed = 42
 confidence = 0.95
