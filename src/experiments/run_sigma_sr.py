@@ -293,56 +293,116 @@ for task_id in task_ids:
     y_raw_residual = residuals_prop_oob
 
     # ### 5.2. Try the candidate fitness functions discussed in NOTES.md
-    #
-    # Ranked best to worst (2026-08-14 entry): MAE and pinball/quantile loss
-    # (both on log(|residual|), robust and coverage-neutral) are preferred
-    # over the scale-invariant log-variance loss and Gaussian NLL (both
-    # squared-error-based, so more outlier-sensitive; NLL also assumes
-    # Gaussian residuals). The last two need custom Julia code since they
-    # aren't per-point-decomposable / use a different target.
-    logvar_loss_julia = """
-    function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-        prediction, flag = eval_tree_array(tree, dataset.X, options)
-        if !flag
-            return L(Inf)
-        end
-        delta = dataset.y .- prediction
-        return L(sum(delta .^ 2) / dataset.n - (sum(delta) / dataset.n) ^ 2)
-    end
-    """
 
-    gaussian_nll_loss_julia = """
+    # Two candidate losses that target the actual downstream conformal
+    # objective instead of regressing against a noisy single-point proxy
+    # (see NOTES.md 2026-08-21 entry / Claude memory sigma-sr-theory):
+    # both are scale-invariant by construction (a uniform blow-up of sigma
+    # changes neither the simulated-calibration width nor a pairwise
+    # ranking), so unlike the direct-bound predictor's asymmetric loss they
+    # don't need a hand-added term to prevent degenerate huge intervals.
+    mean_width_loss_julia = """
     function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
         # tree predicts log(sigma); dataset.y holds the raw OOB residual (not its log)
         log_sigma, flag = eval_tree_array(tree, dataset.X, options)
         if !flag
             return L(Inf)
         end
-        result = 0.0
-        for i in 1:dataset.n
-            result += dataset.y[i]^2 / (2 * exp(2 * log_sigma[i])) + log_sigma[i]
+        sigma = exp.(log_sigma)
+        if any(sigma .<= zero(T)) || !all(isfinite.(sigma))
+            return L(Inf)
         end
-        return result / dataset.n
+
+        # simulate the real conformal calibration step (empirical 95% quantile
+        # of normalized residuals) on this batch, then score the resulting
+        # mean interval width -- literally the downstream deliverable, not a
+        # proxy for it. Manual sort-based quantile since Statistics.quantile
+        # may not be in scope inside PySR's custom-loss eval context.
+        scores = abs.(dataset.y) ./ sigma
+        n = dataset.n
+        sorted_scores = sort(scores)
+        idx = clamp(ceil(Int, 0.95 * n), 1, n)
+        q_hat = L(sorted_scores[idx])
+
+        widths = q_hat .* sigma
+        return L(sum(widths) / n)
+    end
+    """
+
+    pairwise_ranking_loss_julia = """
+    function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
+        # tree predicts log(sigma); dataset.y holds the raw OOB residual (not its log)
+        log_sigma, flag = eval_tree_array(tree, dataset.X, options)
+        if !flag
+            return L(Inf)
+        end
+        if !all(isfinite.(log_sigma))
+            return L(Inf)
+        end
+
+        # only the RELATIVE ordering of sigma across points matters for
+        # downstream conformal efficiency (a constant rescale cancels out at
+        # calibration), so reward correctly ranking pairs of points by true
+        # residual size instead of matching a noisy pointwise target.
+        # Consecutive-row pairing keeps this O(n) and deterministic across
+        # every fitness evaluation (rows are already shuffled by the
+        # upstream train/cal/test split, so this is as good as random
+        # pairing without the run-to-run noise random sampling would add).
+        # Pairs are weighted by |delta_resid| so near-ties (unreliable,
+        # mostly-noise comparisons) contribute little.
+        n = dataset.n
+        npairs = div(n, 2)
+        eps = L(1e-6)
+        # NOTE: margin must be > 0. At margin=0, a constant tree gives
+        # delta_sigma=0 for every pair, so hinge=0 for every pair and the
+        # loss is EXACTLY 0 -- the global minimum, trivially and immediately
+        # achieved by any constant. That's a degenerate optimum, not a
+        # search-budget problem: no formula can ever score better than the
+        # constant's 0, so there is zero selection pressure to leave it.
+        # margin=0.1 makes a constant score exactly 0.1 (bad but beatable),
+        # only reachable by 0 through genuine, sufficiently-separated ranking.
+        margin = L(0.1)
+
+        total_loss = zero(L)
+        total_weight = zero(L)
+        for k in 1:npairs
+            i = 2k - 1
+            j = 2k
+            delta_resid = log(abs(L(dataset.y[j])) + eps) - log(abs(L(dataset.y[i])) + eps)
+            delta_sigma = L(log_sigma[j]) - L(log_sigma[i])
+
+            s = sign(delta_resid)
+            weight = abs(delta_resid)
+
+            hinge = max(zero(L), margin - s * delta_sigma)
+            total_loss += weight * hinge
+            total_weight += weight
+        end
+
+        return total_weight == zero(L) ? zero(L) : total_loss / total_weight
     end
     """
 
     sigma_losses = [
-        ("mae", dict(elementwise_loss="L1DistLoss()"), y_log_abs_residual),
-        # ("pinball_0.5", dict(elementwise_loss="QuantileLoss(0.5)"), y_log_abs_residual),
-        # ("pinball_0.75", dict(elementwise_loss="QuantileLoss(0.75)"), y_log_abs_residual),
-        # ("logvar", dict(loss_function=logvar_loss_julia), y_log_abs_residual),
-        # ("gaussian_nll", dict(loss_function=gaussian_nll_loss_julia), y_raw_residual),
+        # ("mae", dict(elementwise_loss="L1DistLoss()"), y_log_abs_residual),
+        # ("mean_width", dict(loss_function=mean_width_loss_julia), y_raw_residual),
+        ("pairwise_rank", dict(loss_function=pairwise_ranking_loss_julia), y_raw_residual),
     ]
 
     for loss_name, loss_kwargs, y_train_sr in sigma_losses:
         sigma_predictor = PySRRegressor(
-            model_selection="best",
+            model_selection="score",
             tournament_selection_n=15, # default 15
             populations=31, # default 31
             population_size=30, # must be >= topn:=12 (default 27)
             niterations=100, # default 100
             binary_operators=["+", "-", "*", "/"],
             unary_operators=["sin", "cos", "log", "exp"],
+            # nested_constraints={
+            #     "sin": {"cos": 0, "sin": 0}, 
+            #     "cos": {"cos": 0, "sin": 0},
+            #     "log": {"log": 0},
+            #     "exp": {"exp": 0}},
             temp_equation_file=True, # does not clutter directory with temporary files
             verbosity=1, # can also be set to 0, it should be ok
             random_state=random_seed,

@@ -11,6 +11,84 @@
 
 ## Chronological notes
 
+### 2026-08-21
+Analyzed the first completed sigma-SR run end-to-end
+(`results-sigma-sr-42_20260819-165935/`, 22 datasets, `run_sigma_sr.py`'s
+MAE-on-`log|residual|` loss): aggregate performance, dataset-characteristic
+correlations, chosen-equation composition, and the theoretical reason behind
+the single-sigma collapse noticed while reading the equations.
+
+- **Chosen-equation composition, all 22 datasets.** Result: 11/22
+  collapse to `sigma_var` alone, 8/22 to `sigma_knn_res` alone, 1 to
+  `sigma_knn_std` alone, 1 (pumadyn32nh) to base features only, 1 (Moneyball)
+  mixes base+sigma. **`sigma_knn_dist` is never chosen, not once.** Datasets
+  that settle on `knn_res` average 0.95x baseline width (net win); datasets
+  that settle on `var` average 1.15x (net loss, including the single worst
+  result, concrete_compressive_strength at 1.67x).
+- **Confirmed empirically the 2026-08-18 entry's OOB/leave-one-out
+  mechanics** — for the 7 datasets where the chosen equation is a *pure*
+  `log(single_sigma)` (coefficient 1, no additive offset), the resulting
+  SR-CP's mean/median/coverage on cal/test match the corresponding baseline
+  NCP method's.
+  This is the direct empirical signature of what 2026-08-18 established
+  structurally: `oob=True` only changes `.apply()`'s no-argument
+  (self-referential, training-set) behavior; `.apply(X_cal)`/`.apply(X_test)`
+  on genuinely external data is identical whether or not the estimator was
+  fit with `oob=True`. For `ensemble_var` specifically, `run_sigma_sr.py`
+  already deliberately reuses the plain (non-OOB) `de_var` object for
+  cal/test (see the inline comment at that call site). **Not leakage**: OOB protects the
+  training side from self-referential leakage; cal/test rows were never at
+  risk since they were never in any fit set to begin with.
+- **Why this makes SR mostly "select + recalibrate one existing NCP sigma"
+  rather than discover new structure** The fitting target, `log|residual_i|` for a single OOB point, is
+  one noisy sample of that point's local error scale. The four candidate sigma columns are already
+  locally averaged (KNN-neighbor or cross-tree averaging), smoothed
+  estimates of the same latent quantity while raw base features are not.
+  Fitting any reasonably-smooth symbolic function to a noisy pointwise
+  target is itself an implicit smoother (nearby x's pulled toward similar
+  `f(x)`), but needs enough local data density to work; with too little,
+  PySR can't out-perform an explicitly pre-smoothed proxy, so it just
+  recovers one via a monotonic transform. `model_selection
+  ="best"` + default `parsimony` then prunes any second, mutually-correlated
+  sigma column since it rarely earns enough loss reduction to clear the
+  complexity penalty. This directly explains the dataset-scale sensitivity
+  found in the same analysis: more data lets
+  SR's own implicit smoothing get good enough to compete with, or beat, the
+  pre-smoothed sigmas.
+- **Clarified what "difficulty"/"sigma" actually means across the four
+  estimators — not all the same kind of quantity.** `ensemble_var` is a
+  literal statistical variance (of the RF estimator's own predictions across
+  trees — epistemic/model uncertainty only, never touches `y`); `knn_oob_res`
+  is a local average of *total realized error* (aleatoric + epistemic
+  conflated, can't be told apart from a residual alone); `knn_std` is local
+  label dispersion (aleatoric-leaning, but also picks up real unmodeled
+  curvature of the true function within the neighborhood — not pure noise);
+  `knn_dist` is a pure sparsity/extrapolation proxy (never touches `y` or
+  residuals at all). The SR sigma-predictor's own target aims at the same
+  thing as `knn_oob_res`. Worth remembering when reasoning about *why* a
+  given sigma wins on a given dataset: it's not only "smoothed vs. not," it
+  can also be "which underlying source of difficulty (epistemic / aleatoric
+  / sparsity) actually dominates for this dataset."
+- **Candidate next steps to test (none implemented yet)**:
+  1. `model_selection="accuracy"` or a lower `parsimony`, to see whether
+     relaxing the complexity penalty alone produces genuinely richer
+     (multi-sigma or sigma+feature) equations, and at what generalization
+     cost on the small datasets.
+  2. Decorrelate the four sigma columns (residualize each against the
+     others) before feeding to SR, so a combination isn't just combining
+     redundant copies of the same latent signal.
+  3. Pre-smooth the SR *target* itself (e.g. a mild KNN-average of
+     `log|residual|`, independent of the four existing sigma constructions)
+     to lower the noise floor and give raw features a fairer shot.
+  4. Two-stage/boosted SR fit (fit on the target, then fit a second SR model
+     on the residual using the remaining columns) to force multi-term
+     structure without fighting the parsimony pressure directly.
+  5. Revisit a coverage-aware loss for the sigma-estimator itself (in the
+     spirit of `loss_function_julia_penalize_smaller` in the direct-bound
+     predictor, `src/run_interval_sr.py`), rather than a symmetric proxy loss
+     on `log|residual|` — optimizes the actual downstream CP quality instead
+     of a noisy intermediate target.
+
 ### 2026-08-18
 Worked out the exact leakage mechanics of crepes' `DifficultyEstimator`/
 `WrapRegressor` internals needed to get the train/cal/test sigma pipeline
