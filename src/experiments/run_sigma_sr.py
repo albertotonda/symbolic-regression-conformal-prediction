@@ -289,7 +289,7 @@ for task_id in task_ids:
     X_cal_sr = np.concatenate((X_cal, X_cal_sr), axis=1)
     X_test_sr = np.concatenate((X_test, X_test_sr), axis=1)
 
-    y_log_abs_residual = np.log(np.abs(residuals_prop_oob))
+    y_log_abs_residual = np.log(np.abs(residuals_prop_oob) + 1e-6)
     y_raw_residual = residuals_prop_oob
 
     # ### 5.2. Try the candidate fitness functions discussed in NOTES.md
