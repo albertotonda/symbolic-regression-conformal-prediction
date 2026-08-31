@@ -6,6 +6,8 @@ src/xgboost_OpenML-CTR23-statistics.csv
 /src/.ipynb_checkpoints
 __pycache__/
 /src/__marimo__
+/src/experiments/__marimo__
+/src/experiments/layouts
 /.claude
 *.ipynb
 /results*

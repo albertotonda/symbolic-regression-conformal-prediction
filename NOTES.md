@@ -7,9 +7,37 @@
 4. Idea to fix the theoretical miscoverage of the direct confidence bounds regression using symbolic regression: instead of directly predicting confidence bounds, predict difficulty estimation and calibrate on calibration set. Problem: difficulty estimator cannot be trained on the same training set as base regressor. Two ideas:
     * For large datasets, split into two sets (80/20 for example), train base regressor on 80% and difficulty estimator on 20%. Optionally, retrain base regressor after using 100% of data. Note: sigmas used in SR training and comparison are not the same (first are sigmas on 80% of data, second on 100%).
     * For Random Forests: use "free" data from OOB predictions to train difficulty estimator. Use all sigmas from OOB predictions for SR training, and full base predictor for comparison.
-    * (explored further on 2026-08-14 and 2026-08-18 — see chronological notes below for rejected alternatives, dataset-size caveats, fitness-function design, and the exact OOB/leave-one-out mechanics)
 
 ## Chronological notes
+
+### 2026-08-31
+Reviewed `sigma_sr_notebook.py`'s results section (full 22-dataset sweep,
+`results-sigma-sr-42_20260825-101216/`, comparing the `mae`/`mean_width`/
+`pairwise_rank` sigma-SR losses against the 6 baseline CP methods) and
+implemented its "Next steps" loss in `run_sigma_sr.py`.
+
+- **Equation composition**: 58/66 (88%) chosen equations across the 3 losses
+  reduce to a single pre-existing sigma estimator (`var`/`res` dominate,
+  `dist` essentially never chosen) — SR mostly selects/recalibrates an
+  existing difficulty signal rather than discovering new structure. No link
+  between equation complexity and dataset size, dimensionality, or base R².
+- **Marginal coverage is not a differentiator**: all 9 methods land within
+  ~0.5-1.6% of the 0.95 target by construction of split CP; real differences
+  are in interval width and conditional coverage, not average coverage.
+- **Loss comparison**: median width correlates with base-regressor R² for
+  all 3 losses (weaker regressor → wider intervals, as expected). `mean_width`
+  is the least Pareto-dominated of the 3; `mae` performance varies a lot
+  (noisy single-residual proxy); `pairwise_rank` is never the sole
+  Pareto-best, likely a structural weakness (hinge/margin loss has zero
+  gradient once ranking is roughly correct).
+- **`mean_width`'s known weakness**: in-sample optimism — each candidate is
+  calibrated and scored on the same training rows, so it overfits to noise.
+- **Implemented next step**: `bin_crossfit_loss_julia` in `run_sigma_sr.py`. Fixes the
+  in-sample optimism via 2-fold cross-fitting (calibrate the quantile on one
+  fold, score width/coverage on the other) and adds an explicit per-bin
+  (4 equal-frequency Mondrian bins on sigma) squared-coverage-deviation
+  penalty, instead of relying on marginal coverage alone. Not yet run on the
+  full 22-dataset sweep.
 
 ### 2026-08-21
 Analyzed the first completed sigma-SR run end-to-end

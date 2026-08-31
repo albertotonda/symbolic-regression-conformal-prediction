@@ -294,16 +294,9 @@ for task_id in task_ids:
 
     # ### 5.2. Try the candidate fitness functions discussed in NOTES.md
 
-    # Two candidate losses that target the actual downstream conformal
-    # objective instead of regressing against a noisy single-point proxy
-    # (see NOTES.md 2026-08-21 entry / Claude memory sigma-sr-theory):
-    # both are scale-invariant by construction (a uniform blow-up of sigma
-    # changes neither the simulated-calibration width nor a pairwise
-    # ranking), so unlike the direct-bound predictor's asymmetric loss they
-    # don't need a hand-added term to prevent degenerate huge intervals.
-    mean_width_loss_julia = """
+    bin_crossfit_loss_julia = """
     function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-        # tree predicts log(sigma); dataset.y holds the raw OOB residual (not its log)
+        # tree predicts log(sigma); dataset.y holds the raw OOB residual
         log_sigma, flag = eval_tree_array(tree, dataset.X, options)
         if !flag
             return L(Inf)
@@ -313,80 +306,92 @@ for task_id in task_ids:
             return L(Inf)
         end
 
-        # simulate the real conformal calibration step (empirical 95% quantile
-        # of normalized residuals) on this batch, then score the resulting
-        # mean interval width -- literally the downstream deliverable, not a
-        # proxy for it. Manual sort-based quantile since Statistics.quantile
-        # may not be in scope inside PySR's custom-loss eval context.
-        scores = abs.(dataset.y) ./ sigma
         n = dataset.n
-        sorted_scores = sort(scores)
-        idx = clamp(ceil(Int, 0.95 * n), 1, n)
-        q_hat = L(sorted_scores[idx])
-
-        widths = q_hat .* sigma
-        return L(sum(widths) / n)
-    end
-    """
-
-    pairwise_ranking_loss_julia = """
-    function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-        # tree predicts log(sigma); dataset.y holds the raw OOB residual (not its log)
-        log_sigma, flag = eval_tree_array(tree, dataset.X, options)
-        if !flag
-            return L(Inf)
-        end
-        if !all(isfinite.(log_sigma))
+        if n < 8
+            # too few points for a 2-fold x 4-bin split to mean anything
             return L(Inf)
         end
 
-        # only the RELATIVE ordering of sigma across points matters for
-        # downstream conformal efficiency (a constant rescale cancels out at
-        # calibration), so reward correctly ranking pairs of points by true
-        # residual size instead of matching a noisy pointwise target.
-        # Consecutive-row pairing keeps this O(n) and deterministic across
-        # every fitness evaluation (rows are already shuffled by the
-        # upstream train/cal/test split, so this is as good as random
-        # pairing without the run-to-run noise random sampling would add).
-        # Pairs are weighted by |delta_resid| so near-ties (unreliable,
-        # mostly-noise comparisons) contribute little.
-        n = dataset.n
-        npairs = div(n, 2)
-        eps = L(1e-6)
-        # NOTE: margin must be > 0. At margin=0, a constant tree gives
-        # delta_sigma=0 for every pair, so hinge=0 for every pair and the
-        # loss is EXACTLY 0 -- the global minimum, trivially and immediately
-        # achieved by any constant. That's a degenerate optimum, not a
-        # search-budget problem: no formula can ever score better than the
-        # constant's 0, so there is zero selection pressure to leave it.
-        # margin=0.1 makes a constant score exactly 0.1 (bad but beatable),
-        # only reachable by 0 through genuine, sufficiently-separated ranking.
-        margin = L(0.1)
+        target_coverage = L(%.2f)
+        alpha = one(L) - target_coverage
+        n_bins = 4
+        lambda_cov = L(1.0)
 
-        total_loss = zero(L)
-        total_weight = zero(L)
-        for k in 1:npairs
-            i = 2k - 1
-            j = 2k
-            delta_resid = log(abs(L(dataset.y[j])) + eps) - log(abs(L(dataset.y[i])) + eps)
-            delta_sigma = L(log_sigma[j]) - L(log_sigma[i])
+        delta = abs.(dataset.y) ./ sigma
 
-            s = sign(delta_resid)
-            weight = abs(delta_resid)
-
-            hinge = max(zero(L), margin - s * delta_sigma)
-            total_loss += weight * hinge
-            total_weight += weight
+        sigma_rank = sortperm(sigma)
+        bin_id = Vector{Int}(undef, n)
+        for (rank, idx) in enumerate(sigma_rank)
+            bin_id[idx] = clamp(ceil(Int, rank * n_bins / n), 1, n_bins)
         end
 
-        return total_weight == zero(L) ? zero(L) : total_loss / total_weight
+        fold_perm = sortperm(rand(n))
+        half = n ÷ 2
+        fold_A = fold_perm[1:half]
+        fold_B = fold_perm[half+1:end]
+
+        function fold_pass(cal_idx, eval_idx)
+            width_sum = zero(L)
+            width_count = 0
+            cov_sum = zeros(L, n_bins)
+            cov_count = zeros(Int, n_bins)
+            for b in 1:n_bins
+                cal_in_bin = [i for i in cal_idx if bin_id[i] == b]
+                eval_in_bin = [i for i in eval_idx if bin_id[i] == b]
+                if isempty(cal_in_bin) || isempty(eval_in_bin)
+                    continue
+                end
+                cal_scores = sort(delta[cal_in_bin])
+                m = length(cal_scores)
+                q_pos = clamp(ceil(Int, (one(L) - alpha) * m), 1, m)
+                q_hat = L(cal_scores[q_pos])
+
+                for i in eval_in_bin
+                    width_sum += q_hat * L(sigma[i])
+                    width_count += 1
+                    if L(delta[i]) <= q_hat
+                        cov_sum[b] += one(L)
+                    end
+                    cov_count[b] += 1
+                end
+            end
+            return width_sum, width_count, cov_sum, cov_count
+        end
+
+        width_sum_A, width_count_A, cov_sum_A, cov_count_A = fold_pass(fold_A, fold_B)
+        width_sum_B, width_count_B, cov_sum_B, cov_count_B = fold_pass(fold_B, fold_A)
+
+        if width_count_A == 0 || width_count_B == 0
+            return L(Inf)
+        end
+
+        # ell_w: mean interval width, averaged over both cross-fit directions
+        ell_w = (width_sum_A / width_count_A + width_sum_B / width_count_B) / L(2.0)
+
+        # ell_cov per bin, averaged over both cross-fit directions, then
+        # penalized by its squared deviation from the target coverage
+        coverage_penalty = zero(L)
+        n_valid_bins = 0
+        for b in 1:n_bins
+            if cov_count_A[b] == 0 || cov_count_B[b] == 0
+                continue
+            end
+            ell_cov_A = cov_sum_A[b] / cov_count_A[b]
+            ell_cov_B = cov_sum_B[b] / cov_count_B[b]
+            mean_cov = (ell_cov_A + ell_cov_B) / L(2.0)
+            coverage_penalty += (mean_cov - target_coverage)^2
+            n_valid_bins += 1
+        end
+        if n_valid_bins == 0
+            return L(Inf)
+        end
+
+        return ell_w + lambda_cov * coverage_penalty
     end
-    """
+    """ % confidence
 
     sigma_losses = [
-        # ("mae", dict(elementwise_loss="L1DistLoss()"), y_log_abs_residual),
-        # ("mean_width", dict(loss_function=mean_width_loss_julia), y_raw_residual),
-        ("pairwise_rank", dict(loss_function=pairwise_ranking_loss_julia), y_raw_residual),
+        ("bin_crossfit", dict(loss_function=bin_crossfit_loss_julia), y_raw_residual),
     ]
 
     for loss_name, loss_kwargs, y_train_sr in sigma_losses:
@@ -398,11 +403,11 @@ for task_id in task_ids:
             niterations=100, # default 100
             binary_operators=["+", "-", "*", "/"],
             unary_operators=["sin", "cos", "log", "exp"],
-            # nested_constraints={
-            #     "sin": {"cos": 0, "sin": 0}, 
-            #     "cos": {"cos": 0, "sin": 0},
-            #     "log": {"log": 0},
-            #     "exp": {"exp": 0}},
+            nested_constraints={
+                "sin": {"cos": 0, "sin": 0}, 
+                "cos": {"cos": 0, "sin": 0},
+                "log": {"log": 0},
+                "exp": {"exp": 0}},
             temp_equation_file=True, # does not clutter directory with temporary files
             verbosity=1, # can also be set to 0, it should be ok
             random_state=random_seed,
