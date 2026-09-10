@@ -14,11 +14,13 @@ Entry point and full experiment logic. For each OpenML-CTR23 task:
 Everything needed to run and understand one experiment lives in this file,
 grouped into three sections below: conformal predictors, symbolic
 regression, and orchestration (the part that is actually "run"). Config
-(config.py), data loading (data.py) and result plotting/statistics
-(evaluate.py) are kept separate since they're reused as-is by the
-post-hoc analysis scripts in analysis/.
+(config.py), data loading (data.py), difficulty estimation (cp_methods.py),
+the Julia loss (losses.py) and result plotting/statistics (evaluate.py) are
+kept separate since they're shared with run_sigma_sr.py and reused as-is by
+the post-hoc analysis scripts in analysis/.
 """
 
+import argparse
 import json
 import os
 import pickle
@@ -33,16 +35,35 @@ import seaborn as sns
 from collections import defaultdict
 
 from crepes import WrapRegressor
-from crepes.extras import DifficultyEstimator, binning
+from crepes.extras import binning
 
 from sklearn.metrics import r2_score
 
 from pysr import PySRRegressor
 
-from config import REGRESSOR_MODELS, parse_cli_config, save_config_snapshot
-from data import get_benchmark_task_ids, prepare_task_data
-from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
+import openml
 
+from config import load_config, dump_config
+from data import load_and_preprocess_openml_task, split_and_normalize_data
+from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
+from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from losses import penalize_smaller_loss_julia
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.svm import SVR
+from xgboost import XGBRegressor
+
+sns.set_theme(style='darkgrid')
+
+REGRESSOR_MODELS = {
+    "RandomForestRegressor": RandomForestRegressor,
+    "XGBRegressor": XGBRegressor,
+    "SVR": SVR,
+    "LinearRegression": LinearRegression,
+    "Ridge": Ridge,
+    "Lasso": Lasso
+}
 
 # ---------------------------------------------------------------------------
 # Conformal predictors: fitting/calibrating the standard conformal regressor,
@@ -97,76 +118,27 @@ def fit_difficulty_estimators(X_prop_train, y_prop_train, learner_prop, config):
     """
     difficulty_estimators = {}
 
-    # distance of KNN in feature space, default k=25
+    # distance of KNN in feature space
     print("Normalizing confidence intervals using KNN for difficulty estimation...")
-    de_knn_dist = DifficultyEstimator()
-    de_knn_dist.fit(X=X_prop_train, k=config.ncp_knn_k, scaler=True)
-    difficulty_estimators["knn_dist"] = de_knn_dist
+    difficulty_estimators["knn_dist"] = fit_difficulty_estimator(X_prop_train, "knn_dist")
 
     # standard deviation of KNN in target space
     print("Now normalizing using standard deviations...")
-    de_knn_std = DifficultyEstimator()
-    de_knn_std.fit(X=X_prop_train, y=y_prop_train, k=config.ncp_knn_k, scaler=True)
-    difficulty_estimators["knn_std"] = de_knn_std
+    difficulty_estimators["knn_std"] = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train)
 
-    # a third way of normalizing, using absolute residuals; it does not work
-    # for XGBoost, because only Random Forest has out-of-bag predictions for
-    # each individual learner
+    # a third and fourth way of normalizing, using absolute OOB residuals and
+    # ensemble variance; neither works for XGBoost, because only Random
+    # Forest has out-of-bag predictions for each individual learner
     if config.predictor_model == "RandomForestRegressor":
         print("Now normalizing using OOB predictions of each estimator...")
-        residuals_prop_oob = y_prop_train - learner_prop.oob_prediction_
-        de_knn_res = DifficultyEstimator()
-        de_knn_res.fit(X=X_prop_train, residuals=residuals_prop_oob, k=config.ncp_knn_k, scaler=True)
-        difficulty_estimators["knn_oob_res"] = de_knn_res
+        difficulty_estimators["knn_oob_res"] = fit_difficulty_estimator(
+            X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop)
 
-        # a fourth way: using the variance of each element of the ensemble;
-        # XGBoostRegressor doesn't expose the individual estimators, so this
-        # is also RandomForest-only
         print("Now normalizing using variance of the estimators...")
-        de_var = DifficultyEstimator()
-        de_var.fit(X=X_prop_train, learner=learner_prop, scaler=True)
-        difficulty_estimators["ensemble_var"] = de_var
+        difficulty_estimators["ensemble_var"] = fit_difficulty_estimator(
+            X_prop_train, "var", learner_prop=learner_prop)
 
     return difficulty_estimators
-
-
-def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confidence):
-    """
-    Calibrate a normalized conformal regressor using an already-fitted
-    DifficultyEstimator. Returns the confidence intervals for the test set,
-    together with the difficulty estimates on the calibration and test sets
-    (needed later as features for the symbolic regression step).
-    """
-    sigmas_cal = de.apply(X_cal)
-
-    regressor_norm = WrapRegressor(learner_prop)
-    regressor_norm.calibrate(X_cal, y_cal, de=de)
-
-    sigmas_test = de.apply(X_test)
-    intervals = regressor_norm.predict_int(X_test, confidence=confidence)
-
-    return intervals, sigmas_cal, sigmas_test
-
-
-def _find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed):
-    """
-    crepes.extras.binning's min_size parameter requests bins=len(values)//
-    min_size equal-frequency bins, but with tied/duplicated difficulty
-    scores (common for the ensemble-variance estimator) pd.qcut can still
-    leave a handful of bins a few points short of min_size. So, rather than
-    trusting the requested bin count outright, verify the actual per-bin
-    counts and back off the number of bins until every one of them holds at
-    least min_points calibration points.
-    """
-    number_of_bins = len(sigmas_cal_var) // min_points
-    while number_of_bins > 1:
-        assigned_bins, bin_thresholds = binning(
-            sigmas_cal_var, bins=number_of_bins, seed=random_seed)
-        counts = np.bincount(assigned_bins.astype(int))
-        if counts.min() >= min_points:
-            return bin_thresholds
-        number_of_bins -= 1
-    return np.array([-np.inf, np.inf])
 
 
 def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_cal,
@@ -185,9 +157,8 @@ def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_ca
     # typical confidence levels (e.g. 1-0.9 != 0.1 exactly in binary float)
     min_points = int(1 / (1-confidence) - 1) + 1
 
-    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed)
+    bin_thresholds = find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
-    print(f"Number of Mondrian bins: {number_of_bins}")
 
     # the "mc" argument for calibrate() internally takes X as only parameter,
     # so recompute sigmas_var = de_var.apply(X) instead of using pre-computed ones
@@ -209,45 +180,6 @@ def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_ca
 SR_MODEL_FILENAME = "symbolic_regression_cp.pk"
 SR_FEATURES_FILENAME = "sr_features.json"
 
-# unfortunately, using pysr we can define a custom loss function...in Julia.
-# since the syntax is different, we can only use a string that is then passed
-# to the Julia interpreter internally inside the PySRRegressor object
-loss_function_julia_penalize_smaller = """
-function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-
-    # get predicted values for the current tree
-    prediction, flag = eval_tree_array(tree, dataset.X, options)
-
-    # 'flag' == false means that evaluating the tree caused an error
-    if !flag
-        return L(Inf)
-    end
-
-    result = 0.0
-    coverage = 0.0
-    coverage_penalty = 100.0
-
-    # instead of just having a sum of squared means, we penalize more heavily
-    # samples for which the predictions are inferior to 'y' (here the difference
-    # between the true value and the predicted value)
-    for i in 1:length(dataset.y)
-        if (prediction[i] < dataset.y[i])
-            result += 10 * (prediction[i] - dataset.y[i])^2
-        else
-            result += (prediction[i] - dataset.y[i])^2
-            coverage += 1
-        end
-    end
-
-    if ((coverage / dataset.n) < 0.95)
-        # penalty is equal to the difference between complete coverage and current result * weight
-        result += (0.95 - coverage/dataset.n) * dataset.n * coverage_penalty
-    end
-
-    return result / dataset.n
-end
-"""
-
 
 def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pred,
                              sigmas_cal, sigmas_test,
@@ -256,8 +188,9 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     Train a PySRRegressor to predict the amplitude of a confidence interval
     around the point prediction, using point predictions, difficulty
     estimates, and the original features. Uses a custom Julia loss function
-    (loss_function_julia_penalize_smaller) that penalizes intervals that do
-    not cover the true value more heavily than it penalizes wide intervals.
+    (penalize_smaller_loss_julia, see losses.py) that penalizes intervals
+    that do not cover the true value more heavily than it penalizes wide
+    intervals.
     """
     # step 1: prepare data sets with all sigmas and stuff on calibration set
     # and test set; these will be a special version, just for symbolic regression
@@ -285,14 +218,14 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
 
     # now, for the more complex part: we can use a PySRRegressor, but we
     # need to change the fitness function! the fitness function is described
-    # as a string (lines of Julia), defined above
+    # as a string (lines of Julia), defined in losses.py
     ci_regressor = PySRRegressor(
-        tournament_selection_n=config.sr_tournament_selection_n,
-        population_size=config.sr_population_size, # must be >= topn (default 12)
-        niterations=config.sr_niterations,
-        binary_operators=config.sr_binary_operators,
-        unary_operators=config.sr_unary_operators,
-        loss_function=loss_function_julia_penalize_smaller,
+        tournament_selection_n=config.sr_params.tournament_selection_n,
+        population_size=config.sr_params.population_size, # must be >= topn (default 12)
+        niterations=config.sr_params.niterations,
+        binary_operators=config.sr_params.binary_operators,
+        unary_operators=config.sr_params.unary_operators,
+        loss_function=penalize_smaller_loss_julia(config.confidence),
         temp_equation_file=True, # does not clutter directory with temporary files
         verbosity=1, # can also be set to 0, it should be ok
         random_state=random_seed,
@@ -332,23 +265,48 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
 # Orchestration: run every method above on every task, save results as we go.
 # ---------------------------------------------------------------------------
 
-def run_single_task(task_id, config, random_seed, results_folder, results_dictionary):
+def get_benchmark_task_ids(suite_id, tasks_too_good, tasks_too_bad):
+    """
+    Fetch the OpenML suite's task ids, excluding any explicitly flagged as
+    too easy (near-perfect R²) or too hard (near-zero/negative R²) to yield
+    a meaningful conformal-prediction comparison.
+    """
+    suite = openml.study.get_suite(suite_id)
+    excluded = set(tasks_too_good) | set(tasks_too_bad)
+    return [task_id for task_id in suite.tasks if task_id not in excluded]
+
+
+def iter_datasets(config):
+    """
+    Yield one preprocessed Dataset at a time, so tasks are downloaded and
+    run one-by-one instead of buffering the whole suite in memory upfront.
+    """
+    if config.data_source == "openml":
+        task_ids = get_benchmark_task_ids(
+            config.openml_params.suite_id,
+            config.openml_params.tasks_too_good,
+            config.openml_params.tasks_too_bad,
+        )
+        for task_id in task_ids:
+            yield load_and_preprocess_openml_task(task_id)
+
+
+def run_single_task(dataset, task_folder, config, random_seed):
     """
     Run every conformal prediction method being compared on a single task:
-    data prep, base regressor, standard/normalized/Mondrian/symbolic-
-    regression CP, evaluation, and a per-task Pareto plot. New rows are
-    appended in place into results_dictionary (a collections.defaultdict(list)).
+    base regressor, standard/normalized/Mondrian/symbolic-regression CP,
+    evaluation, and a per-task Pareto plot.
 
-    Returns the list of method keys evaluated for this task (used by the
-    caller for the final, all-tasks Pareto plot).
+    Returns (ci_means, ci_medians, coverages, r2) — one scalar per method,
+    for the caller to accumulate across tasks.
     """
+    X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test = split_and_normalize_data(
+        dataset.df_X, dataset.df_y, random_seed)
+    feature_names = list(dataset.df_X.columns)
+
     # placeholders to concatenate all sigmas for symbolic regression
     sigmas_cal = {}
     sigmas_test = {}
-
-    (X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test,
-     feature_names, dataset, task_folder) = prepare_task_data(
-         task_id, results_folder, random_seed)
 
     regressor, y_cal_pred, y_test_pred, r2_test = train_base_regressor(
         X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_test,
@@ -357,7 +315,7 @@ def run_single_task(task_id, config, random_seed, results_folder, results_dictio
     task_results = {}
 
     # Standard CP
-    task_results["conformal_predictor"] = regressor.predict_int(X_test, confidence=config.confidence_level)
+    task_results["conformal_predictor"] = regressor.predict_int(X_test, confidence=config.confidence)
 
     # now we need to access the wrapped learner to re-use it for the other
     # conformal predictors, but it's not difficult
@@ -367,11 +325,11 @@ def run_single_task(task_id, config, random_seed, results_folder, results_dictio
     # to this predictor model (see fit_difficulty_estimators above)
     difficulty_estimators = fit_difficulty_estimators(X_prop_train, y_prop_train, learner_prop, config)
     for sigma_key, de in difficulty_estimators.items():
-        intervals, s_cal, s_test = compute_normalized_intervals(
-            de, learner_prop, X_cal, y_cal, X_test, config.confidence_level)
+        intervals, s_cal = compute_normalized_intervals(
+            de, learner_prop, X_cal, y_cal, X_test, config.confidence)
         task_results[NORMALIZED_CP_RESULT_KEYS[sigma_key]] = intervals
         sigmas_cal[sigma_key] = s_cal
-        sigmas_test[sigma_key] = s_test
+        sigmas_test[sigma_key] = de.apply(X_test)
 
     # Mondrian CP, binned on RF ensemble-variance
     if config.predictor_model == "RandomForestRegressor":
@@ -379,9 +337,9 @@ def run_single_task(task_id, config, random_seed, results_folder, results_dictio
         sigmas_cal_mond = sigmas_cal["ensemble_var"]
         intervals_mond, number_of_bins = compute_mondrian_intervals(
             learner_prop, de_mond, sigmas_cal_mond, X_cal, y_cal, X_test,
-            config.confidence_level, random_seed)
+            config.confidence, random_seed)
         task_results["mondrian_cp"] = intervals_mond
-        results_dictionary["mondrian_bins"].append(number_of_bins)
+        print(f"Number of Mondrian bins: {number_of_bins}")
 
     # proposed approach: symbolic regression intervals, using all sigmas
     task_results["symbolic_regression_cp"] = run_symbolic_regression(
@@ -391,62 +349,59 @@ def run_single_task(task_id, config, random_seed, results_folder, results_dictio
 
     # post-processing of the results for the different confidence intervals
     # statistics we are interested in: coverage, mean size, median size
+    ci_means = {}
+    ci_medians = {}
+    coverages = {}
     for method, confidence_intervals in task_results.items():
-        evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
-                                  dataset, task_folder, results_dictionary)
+        ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(
+            method, confidence_intervals, y_test, y_test_pred, dataset, task_folder)
 
-    results_dictionary["task_id"].append(task_id)
-    results_dictionary["dataset_name"].append(dataset.name)
-    results_dictionary["r2"].append(r2_test)
-
-    # also plot a Pareto-like scheme for this task
-    fig, ax = plot_pareto([k for k in task_results], results_dictionary, translations=translations)
+    # per-task Pareto plot across all methods computed for this task
+    fig, ax = plot_pareto(list(task_results.keys()), ci_medians, coverages, translations=translations)
     ax.set_title("Performance of conformal prediction methods on dataset \"%s\"" % dataset.name)
     plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
     plt.close(fig)
 
-    return list(task_results.keys())
+    return ci_means, ci_medians, coverages, r2_test
 
 
-def run_all_tasks(config, random_seed=42):
+def run_all_tasks(config, random_seed):
+
     results_folder = setup_results_folder("interval-sr", random_seed)
-
-    # set up plotting
-    sns.set_theme(style='darkgrid')
-
-    # get task_id for all tasks in the benchmark suite
-    task_ids = get_benchmark_task_ids(config.suite_id, config.tasks_too_good, config.tasks_too_bad)
-
-    # data structure to store the results; pre-seed the leading columns so
-    # the CSV has a stable, readable column order regardless of which
-    # per-method keys get added first
     results_dictionary = defaultdict(list, {"task_id": [], "dataset_name": [], "r2": []})
 
-    save_config_snapshot(config, random_seed, results_folder)
+    # Save config for tracing
+    dump_config(config, results_folder)
 
-    # start the loop, for every task
-    last_task_methods = []
-    for task_id in task_ids:
-        last_task_methods = run_single_task(
-            task_id, config, random_seed, results_folder, results_dictionary)
+    for dataset in iter_datasets(config):
+        print(dataset)
+
+        task_folder = os.path.join(results_folder, dataset.name)
+        os.makedirs(task_folder, exist_ok=True)
+
+        ci_means, ci_medians, coverages, r2 = run_single_task(dataset, task_folder, config, random_seed)
+
+        results_dictionary["task_id"].append(dataset.id)
+        results_dictionary["dataset_name"].append(dataset.name)
+        results_dictionary["r2"].append(r2)
+
+        for method in ci_means.keys():
+            results_dictionary[f"{method}_mean"].append(ci_means[method])
+            results_dictionary[f"{method}_median"].append(ci_medians[method])
+            results_dictionary[f"{method}_coverage"].append(coverages[method])
 
         # save global dictionary of results as DataFrame after every task,
         # so a crash partway through doesn't lose already-computed results
         df_results = pd.DataFrame.from_dict(results_dictionary)
         df_results.to_csv(os.path.join(results_folder, config.results_csv_name), index=False)
 
-    # and now, a global Pareto front plot
-    fig, ax = plot_pareto(last_task_methods, results_dictionary, translations=translations, all_results=True)
-    ax.set_title("Performance of conformal prediction methods on selected CTR-23 datasets")
-    plt.savefig(os.path.join(results_folder, "pareto.png"), dpi=300)
-
-    # TODO more informative: how many times a conformal predictor is Pareto-optimal?
-    # it has to be done data set by data set, and maybe I could write a specific
-    # post-processing script
-
 
 if __name__ == "__main__":
-    config = parse_cli_config()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config", required=False, default="default_config")
+    args = parser.parse_args()
+    config = load_config("interval-sr", args.config)
 
     # let's run several experiments in a row, with different random seeds
     for random_seed in config.random_seeds:

@@ -1,0 +1,22 @@
+random_seeds: [52]
+confidence: 0.95
+
+data_source: openml
+openml_params:
+    suite_id: 353
+    tasks_too_good: [361236, 361247, 361252, 361254, 361256, 361257, 361268, 361617]
+    tasks_too_bad: [361243, 361244, 361261, 361618, 361619]
+
+results_csv_name: results.csv
+
+predictor_model: RandomForestRegressor
+predictor_params:
+    n_estimators: 500
+    oob_score: True
+
+sr_params:
+    tournament_selection_n: 1
+    population_size: 12
+    niterations: 2
+    binary_operators: ["+", "-", "*", "/"]
+    unary_operators: ["sin", "cos", "log", "exp"]

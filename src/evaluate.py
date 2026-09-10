@@ -44,8 +44,7 @@ def log_equations(sr_model, task_folder, label):
 
 # this is used to translate internal naming convention to readable strings
 # for the plots; methods with no entry here just fall back to their raw key
-# (see plot_pareto/evaluate_and_plot_method below). Both run_interval_sr.py
-# and experiments/run_sigma_sr.py use this same key naming.
+# (see plot_pareto/evaluate_and_plot_method below).
 translations = {
     "conformal_predictor" : "Standard conformal predictor",
     "normalized_cp_knn_dist" : "CP normalized using KNN on distance",
@@ -84,23 +83,16 @@ def plot_confidence_intervals(y, y_pred, y_pred_ci) :
 
     return fig, ax
 
-def plot_pareto(methods, results_dictionary, translations=None, all_results=False) :
-
+def plot_pareto(methods, medians, coverages, translations=None) :
+    """
+    Scatter one point per method: (coverage, median CI amplitude), taken
+    directly from the medians/coverages dicts (one scalar per method).
+    """
     fig, ax = plt.subplots(figsize=(10,8))
 
     for method in methods :
-
-        # get the information related to coverage
-        key_coverage = method + "_coverage"
-        x = results_dictionary[key_coverage]
-
-        # get information on median (or mean)
-        key_median = method + "_median"
-        y = results_dictionary[key_median]
-
-        if all_results == False :
-            x = x[-1]
-            y = y[-1]
+        x = coverages[method]
+        y = medians[method]
 
         if translations is not None :
             method = translations.get(method, method)
@@ -118,29 +110,16 @@ def plot_pareto(methods, results_dictionary, translations=None, all_results=Fals
 
 
 def evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
-                              dataset, task_folder, results_dictionary):
+                              dataset, task_folder):
     """
     Compute coverage/amplitude statistics for one set of confidence
-    intervals, store them in results_dictionary (expected to be a
-    collections.defaultdict(list)), and save a plot of the intervals for
+    intervals and save a plot of the intervals for
     this method.
     """
     ci_amplitude_mean = np.mean((confidence_intervals[:,1] - confidence_intervals[:,0]))
     ci_amplitude_median = np.median((confidence_intervals[:,1] - confidence_intervals[:,0]))
-    # this expression below is a bit of a mess, but it's 1 if the measured
-    # value falls within the confidence intervals, and 0 otherwise (summed up, divided by n_samples)
-    coverage = np.sum([1 if (y_test[i] >= confidence_intervals[i,0] and
-                           y_test[i] <= confidence_intervals[i,1]) else 0
-                    for i in range(len(y_test))])/len(y_test)
+    coverage = np.mean((y_test >= confidence_intervals[:,0]) & (y_test <= confidence_intervals[:,1]))
 
-    # add results to global dictionary of results
-    results_dictionary[method + "_mean"].append(ci_amplitude_mean)
-    results_dictionary[method + "_median"].append(ci_amplitude_median)
-    results_dictionary[method + "_coverage"].append(coverage)
-
-    # plot time! it would be nice to have a classic plot with CI
-    # BUT ALSO a plot Pareto-front style, using (for example)
-    # median and coverage; just take a few points
     fig, ax = plot_confidence_intervals(y_test[:20], y_test_pred[:20],
                                         confidence_intervals[:20])
 
@@ -149,3 +128,5 @@ def evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
 
     plt.savefig(os.path.join(task_folder, method + ".png"), dpi=300)
     plt.close(fig)
+
+    return ci_amplitude_mean, ci_amplitude_median, coverage

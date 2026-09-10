@@ -5,6 +5,7 @@ src/xgboost_OpenML-CTR23-statistics.csv
 /src/figures
 /src/.ipynb_checkpoints
 __pycache__/
+__marimo__
 /src/__marimo__
 /src/experiments/__marimo__
 /src/experiments/layouts
@@ -15,3 +16,4 @@ __pycache__/
 AGENTS.md
 requirements.in
 .venv
+notebooks

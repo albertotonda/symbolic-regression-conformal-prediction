@@ -1,0 +1,35 @@
+random_seeds: [42]
+confidence: 0.95
+
+data_source: openml # from "openml", "synthetic"
+openml_params:
+    suite_id: 353
+
+results_csv_name: results.csv
+
+predictor_model: RandomForestRegressor
+predictor_params:
+    n_estimators: 500
+    oob_score: True
+
+data_augmentation:
+    sigma_knn_dist: True
+    sigma_knn_std: True
+    sigma_knn_res: True
+    sigma_var: True
+
+loss_functions: [bin_crossfit]
+ncp_knn_k: 25
+
+sr_params:
+    npopulations: 31
+    population_size: 30
+    niterations: 100
+    binary_operators: ["+", "-", "*", "/"]
+    unary_operators: ["sin", "cos", "log", "exp"]
+    nested_constraints: {
+        "sin": {"cos": 0, "sin": 0}, 
+        "cos": {"cos": 0, "sin": 0},
+        "log": {"log": 0},
+        "exp": {"exp": 0}
+    }
