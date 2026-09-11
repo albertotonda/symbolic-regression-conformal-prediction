@@ -26,12 +26,12 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from data import load_and_preprocess_openml_task, split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
-from plotting import save_method_pareto_plot, plot_target_distribution, plot_pareto_fronts
-from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
-from losses import bin_crossfit_loss_julia
-from config import load_config, dump_config
+from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
+from utils.evaluate import evaluate_and_plot_method, setup_results_folder
+from utils.plotting import save_method_pareto_plot, plot_target_distribution, plot_pareto_fronts
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.losses import bin_crossfit_loss_julia
+from utils.config import load_config, dump_config
 
 def extract_all_equations(model) -> pd.DataFrame:
     """Every individual in the final population(s) of a fitted PySRRegressor,

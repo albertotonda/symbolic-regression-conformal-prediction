@@ -18,11 +18,11 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from data import split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
-from plotting import save_method_pareto_plot, plot_target_distribution
-from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
-from losses import bin_crossfit_loss_julia
+from utils.data import split_and_normalize_data
+from utils.evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
+from utils.plotting import save_method_pareto_plot, plot_target_distribution
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.losses import bin_crossfit_loss_julia
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 print('All imports OK')

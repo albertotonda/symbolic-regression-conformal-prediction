@@ -11,7 +11,7 @@ from datetime import datetime
 
 import numpy as np
 
-from plotting import save_confidence_interval_plot
+from utils.plotting import save_confidence_interval_plot
 
 
 def setup_results_folder(prefix, random_seed):
@@ -35,8 +35,7 @@ def log_equations(sr_model, task_folder, label):
     as a CSV file (<label>_equations.csv) in task_folder.
     """
     equations = sr_model.equations_.copy()
-    chosen_index = sr_model.get_best().name
-    equations["chosen"] = [True if idx == chosen_index else False for idx in equations.index]
+    equations["chosen"] = (equations.index == sr_model.get_best().name)
 
     print("\n%s: candidate equations (model_selection=%r)" % (label, sr_model.model_selection))
     print(equations[["complexity", "loss", "score", "equation", "chosen"]].to_string(index=False))

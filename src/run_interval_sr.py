@@ -39,12 +39,12 @@ from pysr import PySRRegressor
 
 import openml
 
-from config import load_config, dump_config
-from data import load_and_preprocess_openml_task, split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
-from plotting import save_method_pareto_plot
-from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
-from losses import penalize_smaller_loss_julia
+from utils.config import load_config, dump_config
+from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
+from utils.evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
+from utils.plotting import save_method_pareto_plot
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.losses import penalize_smaller_loss_julia
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge, Lasso

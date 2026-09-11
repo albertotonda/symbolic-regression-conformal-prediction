@@ -19,7 +19,7 @@ from xgboost import XGBRegressor
 
 # run as `python -m analysis.statistics_openml_ctr23` from src/, so src/ (this
 # module's parent) is on sys.path and sibling modules import flatly
-from data import load_and_preprocess_openml_task
+from utils.data import load_and_preprocess_openml_task
 
 if __name__ == "__main__" :
 
