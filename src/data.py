@@ -5,8 +5,6 @@ suite's task ids, downloading/cleaning a single task's data, and splitting
 it into train/calibration/test sets.
 """
 
-import os
-
 import openml
 
 import pandas as pd

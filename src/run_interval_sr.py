@@ -15,9 +15,9 @@ Everything needed to run and understand one experiment lives in this file,
 grouped into three sections below: conformal predictors, symbolic
 regression, and orchestration (the part that is actually "run"). Config
 (config.py), data loading (data.py), difficulty estimation (cp_methods.py),
-the Julia loss (losses.py) and result plotting/statistics (evaluate.py) are
-kept separate since they're shared with run_sigma_sr.py and reused as-is by
-the post-hoc analysis scripts in analysis/.
+the Julia loss (losses.py), result statistics (evaluate.py) and plotting
+(plotting.py) are kept separate since they're shared with run_sigma_sr.py
+and reused as-is by the post-hoc analysis scripts in analysis/.
 """
 
 import argparse
@@ -25,12 +25,8 @@ import json
 import os
 import pickle
 
-import matplotlib
-matplotlib.use("Agg") # headless batch script, only ever saves figures to file
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
 from collections import defaultdict
 
@@ -45,7 +41,8 @@ import openml
 
 from config import load_config, dump_config
 from data import load_and_preprocess_openml_task, split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
+from plotting import save_method_pareto_plot
 from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from losses import penalize_smaller_loss_julia
 
@@ -53,8 +50,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.svm import SVR
 from xgboost import XGBRegressor
-
-sns.set_theme(style='darkgrid')
 
 REGRESSOR_MODELS = {
     "RandomForestRegressor": RandomForestRegressor,
@@ -357,10 +352,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
             method, confidence_intervals, y_test, y_test_pred, dataset, task_folder)
 
     # per-task Pareto plot across all methods computed for this task
-    fig, ax = plot_pareto(list(task_results.keys()), ci_medians, coverages, translations=translations)
-    ax.set_title("Performance of conformal prediction methods on dataset \"%s\"" % dataset.name)
-    plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
-    plt.close(fig)
+    save_method_pareto_plot(
+        list(task_results.keys()), ci_medians, coverages,
+        title="Performance of conformal prediction methods on dataset \"%s\"" % dataset.name,
+        save_path=os.path.join(task_folder, "pareto.png"))
 
     return ci_means, ci_medians, coverages, r2_test
 

@@ -33,3 +33,4 @@ sr_params:
         "log": {"log": 0},
         "exp": {"exp": 0}
     }
+    temp_equation_file: False

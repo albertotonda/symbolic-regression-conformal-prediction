@@ -3,8 +3,6 @@ import sys
 import warnings
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from types import SimpleNamespace
 
@@ -21,12 +19,12 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from data import split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
+from plotting import save_method_pareto_plot, plot_target_distribution
 from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from losses import bin_crossfit_loss_julia
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
-sns.set_theme(style='darkgrid')
 print('All imports OK')
 
 random_seed = 42
@@ -83,13 +81,7 @@ print(f"sigma_true   : min={sigma_true.min():.4f} mean={sigma_true.mean():.4f} m
 df_X = pd.DataFrame(X_data, columns=feature_names)
 df_y = pd.Series(y_data, name="y")
 
-fig, ax = plt.subplots(figsize=(7, 3))
-ax.hist(df_y.values, bins=60)
-ax.set_xlabel('Target value')
-ax.set_ylabel('Count')
-ax.set_title(f"Distribution of target in '{dataset.name}'")
-plt.savefig(os.path.join(task_folder, "target_distribution.png"))
-plt.close(fig)
+plot_target_distribution(df_y.values, dataset.name, os.path.join(task_folder, "target_distribution.png"))
 
 # 2. Split & Normalize (same 50/25/25 split as run_sigma_sr.py)
 X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test = split_and_normalize_data(df_X, df_y, random_seed)
@@ -266,10 +258,10 @@ coverages = {}
 for method, intervals in conf_intervals.items():
     ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(method, intervals, y_test, y_test_pred, dataset, task_folder)
 
-fig, ax = plot_pareto(list(conf_intervals.keys()), ci_medians, coverages, translations=translations)
-ax.set_title(f"Performance of conformal prediction methods on dataset \"{dataset.name}\"")
-plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
-plt.close(fig)
+save_method_pareto_plot(
+    list(conf_intervals.keys()), ci_medians, coverages,
+    title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
+    save_path=os.path.join(task_folder, "pareto.png"))
 
 # 6. Save results
 results_dictionary = {"task_id": ["synthetic"], "dataset_name": [dataset.name], "r2": [r2]}

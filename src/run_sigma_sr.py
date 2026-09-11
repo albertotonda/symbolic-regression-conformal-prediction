@@ -1,10 +1,12 @@
 import os
 import sys
+
+os.environ["PYSR_RECORDER"] = "true"
+os.environ["PYSR_RECORDER_FILE"] = "history.jsonl"
+
 import argparse
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from collections import defaultdict
 
@@ -15,6 +17,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score
 
 from pysr import PySRRegressor
+from pysr.julia_import import SymbolicRegression, jl
+from pysr.julia_helpers import jl_array
 
 import openml
 
@@ -23,12 +27,67 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from data import load_and_preprocess_openml_task, split_and_normalize_data
-from evaluate import evaluate_and_plot_method, log_equations, plot_pareto, setup_results_folder, translations
+from evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
+from plotting import save_method_pareto_plot, plot_target_distribution, plot_pareto_fronts
 from cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from losses import bin_crossfit_loss_julia
 from config import load_config, dump_config
 
-sns.set_theme(style='darkgrid')
+def extract_all_equations(model) -> pd.DataFrame:
+    """Every individual in the final population(s) of a fitted PySRRegressor,
+    as a flat DataFrame with `output_index`, `complexity`, `loss`, `cost`, `equation`.
+    """
+    populations, _hof = model.julia_state_
+    options = model.julia_options_
+    variable_names = jl_array([str(v) for v in model.feature_names_in_])
+
+    nout = getattr(model, "nout_", 1)
+    rows = []
+    for j in range(nout):
+        for pop in populations[j]:
+            for member in pop.members:
+                rows.append(
+                    {
+                        "output_index": j,
+                        "complexity": int(
+                            SymbolicRegression.compute_complexity(member, options)
+                        ),
+                        "loss": float(member.loss),
+                        "cost": float(member.cost),
+                        "equation": str(
+                            SymbolicRegression.string_tree(
+                                member.tree, options, variable_names=variable_names
+                            )
+                        ),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def compute_pareto_fronts(df: pd.DataFrame, n_fronts: int = 1) -> list:
+    """Peel successive Pareto fronts out of a DataFrame of equations
+    (needs `complexity`, `loss`, `cost` columns -- one output at a time).
+
+    Matches SymbolicRegression.jl's own dominance rule in pure pandas: the
+    best-cost individual at each complexity, then only those whose loss beats
+    every smaller-complexity survivor (front 1); peeling those off and
+    repeating gives front 2, 3, ...
+    """
+    remaining = (
+        df.loc[df.groupby("complexity")["cost"].idxmin()]
+        .sort_values("complexity")
+        .reset_index(drop=True)
+    )
+
+    fronts = []
+    for _ in range(n_fronts):
+        if remaining.empty:
+            break
+        running_min = remaining["loss"].shift().cummin().fillna(np.inf)
+        on_front = remaining["loss"] < running_min
+        fronts.append(remaining[on_front].reset_index(drop=True))
+        remaining = remaining[~on_front]
+    return fronts
 
 
 def run_single_task(dataset, task_folder, config, random_seed):
@@ -167,14 +226,29 @@ def run_single_task(dataset, task_folder, config, random_seed):
             binary_operators=config.sr_params.binary_operators,
             unary_operators=config.sr_params.unary_operators,
             nested_constraints=config.sr_params.nested_constraints,
-            temp_equation_file=True, # does not clutter directory with temporary files
             verbosity=1, # can also be set to 0, it should be ok
             random_state=random_seed,
+            output_directory=task_folder,
+            run_id="checkpoints",
+            tempdir=task_folder,
             **loss_kwargs,
         )
+
+
         sigma_predictor.fit(X_train_sr, y_train_sr)
 
-        log_equations(sigma_predictor, task_folder, f"symbolic_regression_{loss_name}")
+        # Hall of Fame equations
+        # de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.equations_["lambda_format"][0](X)))
+
+        df_hof = pd.read_csv(sigma_predictor.get_equation_file())
+        df_hof["Chosen"] = (df_hof.index == sigma_predictor.get_best().name)
+        df_hof.to_csv(sigma_predictor.get_equation_file())
+
+        # Total equations at the end of the evolution (different from HOF!)
+        df_equations = extract_all_equations(sigma_predictor)
+        df_equations.to_csv(os.path.join(task_folder, "checkpoints", "equations_all.csv"))
+        fronts = compute_pareto_fronts(df_equations, n_fronts=3)
+        plot_pareto_fronts(fronts, os.path.join(task_folder, "pareto_fronts.png"))
 
         de_sr = DifficultyEstimator()
         de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.predict(X)), scaler=True)
@@ -193,9 +267,6 @@ def run_single_task(dataset, task_folder, config, random_seed):
         )
         sigmas_comp[f"symbolic_regression_{loss_name}"] = sigmas_cal_sr
 
-        #TODO: remove for all datasets
-        break
-
     ci_means = {}
     ci_medians = {}
     coverages = {}
@@ -205,10 +276,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
         ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(method, intervals, y_test, y_test_pred, dataset, task_folder)
 
     # per-task Pareto plot across all methods computed for this task
-    fig, ax = plot_pareto(list(conf_intervals.keys()), ci_medians, coverages, translations=translations)
-    ax.set_title(f"Performance of conformal prediction methods on dataset \"{dataset.name}\"")
-    plt.savefig(os.path.join(task_folder, "pareto.png"), dpi=300)
-    plt.close(fig)
+    save_method_pareto_plot(
+        list(conf_intervals.keys()), ci_medians, coverages,
+        title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
+        save_path=os.path.join(task_folder, "pareto.png"))
 
     return ci_means, ci_medians, coverages, r2
 
@@ -254,16 +325,13 @@ def run_all_tasks(config, random_seed):
             results_dictionary[f"{method}_coverage"].append(coverages[method])
 
         # Plot target distribution
-        fig, ax = plt.subplots(figsize=(7, 3))
-        ax.hist(dataset.df_y.values, bins=60)
-        ax.set_xlabel('Target value')
-        ax.set_ylabel('Count')
-        ax.set_title(f"Distribution of target in '{dataset.name}'")
-        plt.savefig(os.path.join(task_folder, "target_distribution.png"))
-        plt.close(fig)
+        plot_target_distribution(dataset.df_y.values, dataset.name, os.path.join(task_folder, "target_distribution.png"))
 
         df_results = pd.DataFrame.from_dict(results_dictionary)
         df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
+
+        #TODO: remove for all datasets
+        break
         
 
 
