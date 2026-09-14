@@ -10,6 +10,49 @@
 
 ## Chronological notes
 
+### 2026-09-14 (uncommitted as of this note)
+Extended the Hall-of-Fame diagnostics from 2026-09-11 and made a first pass
+at testing whether SR can find difficulty structure without leaning on the
+4 pre-computed sigma proxies.
+
+- **Turned off all 4 sigma-augmentation columns** in
+  `src/configs/sigma-sr/default_config.yaml`. This only gates what's fed into the SR input
+  matrix — the 4 baseline normalized-CP methods themselves are still always
+  computed. With augmentation off, SR now fits purely on
+  raw base features, directly testing the collapse mechanism (SR mostly re-selecting one of the 4 pre-smoothed sigmas rather than discovering new structure); with the proxies removed,
+  SR has to either discover structure from raw features or fail to beat
+  baseline width.
+- Also in the same config: added `lambda_cov: 500` (now threaded as an
+  explicit parameter into `bin_crossfit_loss_julia(confidence, lambda_cov)`
+  in `utils/losses.py`, replacing what was previously an undefined
+  `lambda_cov` reference inside the Julia loss string); dropped `sin`/`cos`
+  from `unary_operators` (now just `log`/`exp`).
+- **New diagnostic plots**, all keyed off a new
+  `compute_binned_coverage_width` helper (`utils/evaluate.py`: quantile-bins
+  test points by a difficulty score, reports per-bin coverage/median
+  width/mean width):
+  - `plot_equation_performance_vs_complexity` — every Hall-of-Fame equation
+    for a loss, scattered by (coverage, width) and colored by complexity,
+    chosen equation highlighted.
+  - `plot_binned_sigma_metric` — coverage/width vs. binned difficulty score;
+    used two ways: across every HoF equation (colored by complexity, only
+    the chosen one labeled) and across CP methods (one line per method).
+  - `plot_sigma_distributions` — violin plot of each method's difficulty
+    score, normalized by its own median (raw scales aren't comparable
+    across estimator types).
+  - `plot_cross_dataset_pareto` (+ `melt_results_for_cross_dataset_plot` in
+    `evaluate.py`) — one (dataset, method) point per dot, cross-dataset
+    counterpart to the existing per-dataset `pareto.png`; called once at the
+    end of `run_all_tasks`.
+  - Test-set sigmas (`sigmas_test`) are now saved for `symbolic_regression_*`
+    too (previously only cal-set `sigmas_comp` was), needed for the
+    size-stratified test-set coverage plots above.
+
+### 2026-09-11
+Added the ability to pull the **entire** PySR
+Hall of Fame and all equations from last generation 
+per dataset/loss
+
 ### 2026-08-31
 Reviewed `sigma_sr_notebook.py`'s results section (full 22-dataset sweep,
 `results-sigma-sr-42_20260825-101216/`, comparing the `mae`/`mean_width`/
