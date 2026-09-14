@@ -8,7 +8,7 @@ from box import Box
 import yaml
 import os
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs")
 
 def load_config(experiment, config_name = "default_config"):
     with open(os.path.join(CONFIG_DIR, experiment, f"{config_name}.yaml"), "r") as f:

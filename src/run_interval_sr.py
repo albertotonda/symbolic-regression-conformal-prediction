@@ -41,8 +41,8 @@ import openml
 
 from utils.config import load_config, dump_config
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
-from utils.plotting import save_method_pareto_plot
+from utils.evaluate import compute_ci_stats, log_equations, setup_results_folder
+from utils.plotting import plot_confidence_intervals, plot_pareto
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import penalize_smaller_loss_julia
 
@@ -348,11 +348,14 @@ def run_single_task(dataset, task_folder, config, random_seed):
     ci_medians = {}
     coverages = {}
     for method, confidence_intervals in task_results.items():
-        ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(
-            method, confidence_intervals, y_test, y_test_pred, dataset, task_folder)
+        ci_means[method], ci_medians[method], coverages[method] = compute_ci_stats(confidence_intervals, y_test)
+        plot_confidence_intervals(
+            method, y_test, y_test_pred, confidence_intervals, dataset.name,
+            coverages[method], ci_medians[method],
+            os.path.join(task_folder, method + ".png"))
 
     # per-task Pareto plot across all methods computed for this task
-    save_method_pareto_plot(
+    plot_pareto(
         list(task_results.keys()), ci_medians, coverages,
         title="Performance of conformal prediction methods on dataset \"%s\"" % dataset.name,
         save_path=os.path.join(task_folder, "pareto.png"))

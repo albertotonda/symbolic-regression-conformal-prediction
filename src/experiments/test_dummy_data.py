@@ -19,8 +19,8 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from utils.data import split_and_normalize_data
-from utils.evaluate import evaluate_and_plot_method, log_equations, setup_results_folder
-from utils.plotting import save_method_pareto_plot, plot_target_distribution
+from utils.evaluate import compute_ci_stats, log_equations, setup_results_folder
+from utils.plotting import plot_confidence_intervals, plot_pareto, plot_target_distribution
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
 
@@ -256,9 +256,13 @@ ci_means = {}
 ci_medians = {}
 coverages = {}
 for method, intervals in conf_intervals.items():
-    ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(method, intervals, y_test, y_test_pred, dataset, task_folder)
+    ci_means[method], ci_medians[method], coverages[method] = compute_ci_stats(intervals, y_test)
+    plot_confidence_intervals(
+        method, y_test, y_test_pred, intervals, dataset.name,
+        coverages[method], ci_medians[method],
+        os.path.join(task_folder, method + ".png"))
 
-save_method_pareto_plot(
+plot_pareto(
     list(conf_intervals.keys()), ci_medians, coverages,
     title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
     save_path=os.path.join(task_folder, "pareto.png"))

@@ -11,8 +11,6 @@ from datetime import datetime
 
 import numpy as np
 
-from utils.plotting import save_confidence_interval_plot
-
 
 def setup_results_folder(prefix, random_seed):
     """
@@ -43,19 +41,13 @@ def log_equations(sr_model, task_folder, label):
     equations.to_csv(os.path.join(task_folder, "%s_equations.csv" % label), index=False)
 
 
-def evaluate_and_plot_method(method, confidence_intervals, y_test, y_test_pred,
-                              dataset, task_folder):
+def compute_ci_stats(confidence_intervals, y_test):
     """
-    Compute coverage/amplitude statistics for one set of confidence
-    intervals and save a plot of the intervals for this method.
+    Compute mean/median interval amplitude and empirical coverage for one
+    set of confidence intervals.
     """
     ci_amplitude_mean = np.mean((confidence_intervals[:,1] - confidence_intervals[:,0]))
     ci_amplitude_median = np.median((confidence_intervals[:,1] - confidence_intervals[:,0]))
     coverage = np.mean((y_test >= confidence_intervals[:,0]) & (y_test <= confidence_intervals[:,1]))
-
-    save_confidence_interval_plot(
-        method, y_test, y_test_pred, confidence_intervals,
-        dataset.name, coverage, ci_amplitude_median,
-        os.path.join(task_folder, method + ".png"))
 
     return ci_amplitude_mean, ci_amplitude_median, coverage

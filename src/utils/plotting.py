@@ -58,11 +58,17 @@ METHOD_COLORS = dict(zip(_METHOD_ORDER, _CATEGORICAL_PALETTE))
 _FALLBACK_COLOR = "#898781" # muted ink, for any method key not listed above
 
 
-def plot_confidence_intervals(y, y_pred, y_pred_ci):
+def plot_confidence_intervals(method, y_test, y_test_pred, confidence_intervals,
+                               dataset_name, coverage, ci_amplitude_median, save_path):
     """
     Plot measured values, point predictions, and their confidence
-    intervals, for a handful of samples sorted by increasing target value.
+    intervals, for a handful of test samples sorted by increasing target
+    value, and save the figure to save_path.
     """
+    y = y_test[:20]
+    y_pred = y_test_pred[:20]
+    y_pred_ci = confidence_intervals[:20]
+
     # sort y_test values from small to big, along with y_pred_ci
     # using a list is pretty slow, there is probably a smarter way to do this
     # with numpy arrays, but the data set sizes should be small, so who cares
@@ -85,17 +91,6 @@ def plot_confidence_intervals(y, y_pred, y_pred_ci):
     ax.set_ylabel("Value of target y")
     ax.legend(loc='best')
 
-    return fig, ax
-
-
-def save_confidence_interval_plot(method, y_test, y_test_pred, confidence_intervals,
-                                   dataset_name, coverage, ci_amplitude_median, save_path):
-    """
-    Build the confidence-interval plot (plot_confidence_intervals) for a
-    handful of test samples and save it to save_path.
-    """
-    fig, ax = plot_confidence_intervals(y_test[:20], y_test_pred[:20], confidence_intervals[:20])
-
     title = "%s on data set \"%s\" (coverage=%.4f, median=%.2f)" % (
         translations.get(method, method), dataset_name, coverage, ci_amplitude_median)
     ax.set_title(title)
@@ -104,10 +99,11 @@ def save_confidence_interval_plot(method, y_test, y_test_pred, confidence_interv
     plt.close(fig)
 
 
-def plot_method_pareto(methods, medians, coverages, translations=translations):
+def plot_pareto(methods, medians, coverages, title, save_path, translations=translations):
     """
     Scatter one point per method: (coverage, median CI amplitude), taken
-    directly from the medians/coverages dicts (one scalar per method).
+    directly from the medians/coverages dicts (one scalar per method), and
+    save the figure to save_path.
     """
     labels = [translations.get(m, m) if translations is not None else m for m in methods]
     palette = {label: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m, label in zip(methods, labels)}
@@ -137,17 +133,9 @@ def plot_method_pareto(methods, medians, coverages, translations=translations):
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2,
               title=None, fontsize='small', markerscale=0.7, framealpha=0.85)
 
-    return fig, ax
-
-
-def save_method_pareto_plot(methods, medians, coverages, title, save_path):
-    """
-    Build the Pareto scatter plot (plot_pareto) and save it to save_path.
-    """
-    fig, ax = plot_method_pareto(methods, medians, coverages)
     ax.set_title(title)
     # bbox_inches='tight' recomputes the layout at save time, so the
-    # legend placed outside the axes (see plot_pareto) doesn't get clipped
+    # legend placed outside the axes above doesn't get clipped
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 

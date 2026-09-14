@@ -27,8 +27,8 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import evaluate_and_plot_method, setup_results_folder
-from utils.plotting import save_method_pareto_plot, plot_target_distribution, plot_pareto_fronts
+from utils.evaluate import compute_ci_stats, setup_results_folder
+from utils.plotting import plot_confidence_intervals, plot_pareto, plot_target_distribution, plot_pareto_fronts
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
 from utils.config import load_config, dump_config
@@ -238,10 +238,39 @@ def run_single_task(dataset, task_folder, config, random_seed):
         sigma_predictor.fit(X_train_sr, y_train_sr)
 
         # Hall of Fame equations
-        # de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.equations_["lambda_format"][0](X)))
-
         df_hof = pd.read_csv(sigma_predictor.get_equation_file())
-        df_hof["Chosen"] = (df_hof.index == sigma_predictor.get_best().name)
+        df_hof["Chosen"] = (df_hof.index == sigma_predictor.get_best().name) # get_best method returns best equation according to model_selection parameter
+        df_hof["sigmas"] = pd.Series([None] * len(df_hof), index=df_hof.index, dtype=object)
+        df_hof.set_index("Complexity", inplace=True)
+
+        for idx in range(len(df_hof)):
+            de = DifficultyEstimator()
+            de.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.equations_["lambda_format"][idx](X)))
+            sigmas_cal_sr = de.apply(X_cal_sr)
+            sigmas_test_sr = de.apply(X_test_sr)
+
+            # WrapRegressor.calibrate()/.predict_int() feed the SAME X to both the
+            # wrapped learner (needs the raw data) and de.apply() (needs the
+            # sigma-augmented columns) — incompatible here, so calibrate manually via
+            # the lower-level ConformalRegressor instead.
+            cr = ConformalRegressor()
+            cr.fit(y_cal - learner_prop.predict(X_cal), sigmas=sigmas_cal_sr)
+    
+            ci_intervals = cr.predict_int(
+                learner_prop.predict(X_test), sigmas=sigmas_test_sr, confidence=config.confidence
+            )
+
+            if df_hof.iloc[idx]["Chosen"]:
+                conf_intervals[f"symbolic_regression_{loss_name}"] = ci_intervals
+                sigmas_comp[f"symbolic_regression_{loss_name}"] = sigmas_cal_sr
+
+            ci_mean, ci_median, coverage = compute_ci_stats(ci_intervals, y_test)
+            row_label = df_hof.index[idx]
+            df_hof.loc[row_label, "ci_median"] = ci_median
+            df_hof.loc[row_label, "ci_mean"] = ci_mean
+            df_hof.loc[row_label, "coverage"] = coverage
+            df_hof.at[row_label, "sigmas"] = list(sigmas_cal_sr)
+
         df_hof.to_csv(sigma_predictor.get_equation_file())
 
         # Total equations at the end of the evolution (different from HOF!)
@@ -250,33 +279,21 @@ def run_single_task(dataset, task_folder, config, random_seed):
         fronts = compute_pareto_fronts(df_equations, n_fronts=3)
         plot_pareto_fronts(fronts, os.path.join(task_folder, "pareto_fronts.png"))
 
-        de_sr = DifficultyEstimator()
-        de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.predict(X)), scaler=True)
-        sigmas_cal_sr = de_sr.apply(X_cal_sr)
-        sigmas_test_sr = de_sr.apply(X_test_sr)
-
-        # WrapRegressor.calibrate()/.predict_int() feed the SAME X to both the
-        # wrapped learner (needs the raw data) and de.apply() (needs the
-        # sigma-augmented columns) — incompatible here, so calibrate manually via
-        # the lower-level ConformalRegressor instead.
-        cr_sr = ConformalRegressor()
-        cr_sr.fit(y_cal - learner_prop.predict(X_cal), sigmas=sigmas_cal_sr)
-
-        conf_intervals[f"symbolic_regression_{loss_name}"] = cr_sr.predict_int(
-            learner_prop.predict(X_test), sigmas=sigmas_test_sr, confidence=config.confidence
-        )
-        sigmas_comp[f"symbolic_regression_{loss_name}"] = sigmas_cal_sr
-
+        
     ci_means = {}
     ci_medians = {}
     coverages = {}
 
-    # per-method CI plot + coverage/amplitude stats
+    # per-method coverage/amplitude stats + CI plot
     for method, intervals in conf_intervals.items():
-        ci_means[method], ci_medians[method], coverages[method] = evaluate_and_plot_method(method, intervals, y_test, y_test_pred, dataset, task_folder)
+        ci_means[method], ci_medians[method], coverages[method] = compute_ci_stats(intervals, y_test)
+        plot_confidence_intervals(
+            method, y_test, y_test_pred, intervals, dataset.name,
+            coverages[method], ci_medians[method],
+            os.path.join(task_folder, method + ".png"))
 
     # per-task Pareto plot across all methods computed for this task
-    save_method_pareto_plot(
+    plot_pareto(
         list(conf_intervals.keys()), ci_medians, coverages,
         title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
         save_path=os.path.join(task_folder, "pareto.png"))
