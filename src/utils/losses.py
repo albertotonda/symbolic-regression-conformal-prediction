@@ -37,7 +37,7 @@ def penalize_smaller_loss_julia(confidence):
     """ % confidence
 
 
-def bin_crossfit_loss_julia(confidence):
+def bin_crossfit_loss_julia(confidence, lambda_cov):
     return """
     function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
         # tree predicts log(sigma); dataset.y holds the raw OOB residual
@@ -130,6 +130,6 @@ def bin_crossfit_loss_julia(confidence):
             return L(Inf)
         end
 
-        return ell_w + lambda_cov * coverage_penalty
+        return ell_w + L(%.2f) * coverage_penalty
     end
-    """ % confidence
+    """ % (confidence, lambda_cov)

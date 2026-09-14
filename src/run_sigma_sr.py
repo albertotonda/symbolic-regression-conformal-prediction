@@ -27,11 +27,31 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import compute_ci_stats, setup_results_folder
-from utils.plotting import plot_confidence_intervals, plot_pareto, plot_target_distribution, plot_pareto_fronts
+from utils.evaluate import (
+    compute_ci_stats, setup_results_folder,
+    compute_binned_coverage_width, melt_results_for_cross_dataset_plot,
+)
+from utils.plotting import (
+    plot_confidence_intervals, plot_pareto, plot_target_distribution, plot_pareto_fronts,
+    plot_binned_sigma_metric, plot_sigma_distributions, plot_sigma_vs_residual,
+    plot_equation_performance_vs_complexity, plot_cross_dataset_pareto,
+    METHOD_COLORS, translations, _FALLBACK_COLOR,
+)
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
 from utils.config import load_config, dump_config
+
+# sigmas_train/cal/test are keyed by the short difficulty-estimator name
+# (set in the augmentation blocks below); conf_intervals/sigmas_comp are
+# keyed by the corresponding CP method name -- this maps one to the other
+# for the plots that need both a method's difficulty score and its
+# intervals together (size-stratified coverage).
+SIGMA_TEST_KEY_TO_METHOD = {
+    "knn_dist": "normalized_cp_knn_dist",
+    "knn_std": "normalized_cp_knn_std",
+    "knn_res": "normalized_cp_knn_res",
+    "var": "normalized_cp_norm_var",
+}
 
 def extract_all_equations(model) -> pd.DataFrame:
     """Every individual in the final population(s) of a fitted PySRRegressor,
@@ -212,7 +232,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
     y_raw_residual = residuals_prop_oob
 
     sigma_losses = {
-        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence)), y_raw_residual),
+        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), y_raw_residual),
     }
 
     for loss_name in config.loss_functions:
@@ -243,6 +263,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
         df_hof["sigmas"] = pd.Series([None] * len(df_hof), index=df_hof.index, dtype=object)
         df_hof.set_index("Complexity", inplace=True)
 
+        equation_binned_stats = {}
         for idx in range(len(df_hof)):
             de = DifficultyEstimator()
             de.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.equations_["lambda_format"][idx](X)))
@@ -263,6 +284,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
             if df_hof.iloc[idx]["Chosen"]:
                 conf_intervals[f"symbolic_regression_{loss_name}"] = ci_intervals
                 sigmas_comp[f"symbolic_regression_{loss_name}"] = sigmas_cal_sr
+                sigmas_test[f"symbolic_regression_{loss_name}"] = sigmas_test_sr
 
             ci_mean, ci_median, coverage = compute_ci_stats(ci_intervals, y_test)
             row_label = df_hof.index[idx]
@@ -270,6 +292,8 @@ def run_single_task(dataset, task_folder, config, random_seed):
             df_hof.loc[row_label, "ci_mean"] = ci_mean
             df_hof.loc[row_label, "coverage"] = coverage
             df_hof.at[row_label, "sigmas"] = list(sigmas_cal_sr)
+            equation_binned_stats[row_label] = compute_binned_coverage_width(
+                sigmas_test_sr, ci_intervals, y_test, min_points, random_seed)
 
         df_hof.to_csv(sigma_predictor.get_equation_file())
 
@@ -279,7 +303,30 @@ def run_single_task(dataset, task_folder, config, random_seed):
         fronts = compute_pareto_fronts(df_equations, n_fronts=3)
         plot_pareto_fronts(fronts, os.path.join(task_folder, "pareto_fronts.png"))
 
-        
+        # complexity vs. coverage/width across every Hall-of-Fame equation for this loss
+        plot_equation_performance_vs_complexity(
+            df_hof, loss_name, dataset.name,
+            os.path.join(task_folder, f"equation_performance_{loss_name}.png"))
+
+        # sigma-binned coverage/width across every Hall-of-Fame equation for this loss,
+        # colored by complexity (same convention as plot_equation_performance_vs_complexity)
+        equation_complexity = {k: k for k in equation_binned_stats}
+        equation_highlighted = [k for k in df_hof.index if df_hof.loc[k]["Chosen"]]
+        plot_binned_sigma_metric(
+            binned_stats=equation_binned_stats,
+            metric="coverage",
+            save_path=os.path.join(task_folder, f"equation_binned_sigma_coverage_{loss_name}.png"),
+            highlighted_keys=equation_highlighted,
+            complexity=equation_complexity,
+            )
+        plot_binned_sigma_metric(
+            binned_stats=equation_binned_stats,
+            metric="median_width",
+            save_path=os.path.join(task_folder, f"equation_binned_sigma_median_width_{loss_name}.png"),
+            highlighted_keys=equation_highlighted,
+            complexity=equation_complexity,
+            )
+
     ci_means = {}
     ci_medians = {}
     coverages = {}
@@ -297,6 +344,57 @@ def run_single_task(dataset, task_folder, config, random_seed):
         list(conf_intervals.keys()), ci_medians, coverages,
         title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
         save_path=os.path.join(task_folder, "pareto.png"))
+
+    # size-stratified coverage/width, for methods with a real fitted difficulty
+    # estimator (test-set sigmas are only ever populated for those, see
+    # sigmas_test above and SIGMA_TEST_KEY_TO_METHOD)
+    binned_stats = {}
+    for key, sigma_arr in sigmas_test.items():
+        method = SIGMA_TEST_KEY_TO_METHOD.get(key, key)
+        if method in conf_intervals:
+            binned_stats[method] = compute_binned_coverage_width(
+                sigma_arr, conf_intervals[method], y_test, min_points, random_seed)
+    if binned_stats:
+        plot_binned_sigma_metric(
+            binned_stats=binned_stats,
+            metric="coverage",
+            save_path=os.path.join(task_folder, "method_binned_sigma_coverage.png"),
+            labels=translations,
+            )
+        plot_binned_sigma_metric(
+            binned_stats=binned_stats,
+            metric="median_width",
+            save_path=os.path.join(task_folder, "method_binned_sigma_median_width.png"),
+            labels=translations,
+            )
+
+    # marginal difficulty-score distributions, same method scope as above plus
+    # every SR loss function (sigmas_comp is populated unconditionally, unlike sigmas_test)
+    sr_methods = [f"symbolic_regression_{loss_name}" for loss_name in config.loss_functions]
+    sigma_dist_methods = list(SIGMA_TEST_KEY_TO_METHOD.values()) + sr_methods
+    sigmas_for_dist = {m: sigmas_comp[m] for m in sigma_dist_methods if m in sigmas_comp}
+    if sigmas_for_dist:
+        dist_colors = {m: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m in sigmas_for_dist}
+        dist_labels = {m: translations.get(m, m) for m in sigmas_for_dist}
+        plot_sigma_distributions(
+            sigmas_for_dist, f"Difficulty-score distributions on \"{dataset.name}\"",
+            os.path.join(task_folder, "sigma_distributions.png"),
+            colors=dist_colors, labels=dist_labels)
+
+    # does each method's difficulty score actually track realized test-set
+    # error? (raw-point counterpart to method_binned_sigma_* above, which
+    # shows the same relationship after binning); scope matches binned_stats
+    # -- only methods with a real fitted difficulty estimator have test-set sigmas
+    abs_residuals_test = np.abs(y_test - y_test_pred)
+    # sigma_vs_residual = {SIGMA_TEST_KEY_TO_METHOD.get(key, key): sigma_arr for key, sigma_arr in sigmas_test.items()}
+    sigma_vs_residual = False
+    if sigma_vs_residual:
+        plot_sigma_vs_residual(
+            sigma_vs_residual, abs_residuals_test,
+            title=f"Difficulty score vs. realized error on \"{dataset.name}\"",
+            save_path=os.path.join(task_folder, "sigma_vs_residual.png"),
+            colors={m: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m in sigma_vs_residual},
+            labels=translations)
 
     return ci_means, ci_medians, coverages, r2
 
@@ -349,7 +447,17 @@ def run_all_tasks(config, random_seed):
 
         #TODO: remove for all datasets
         break
-        
+
+    # cross-dataset counterpart to each task's own pareto.png -- one point per
+    # (dataset, method) instead of one aggregate point per method
+    df_results = pd.DataFrame.from_dict(results_dictionary)
+    methods = sorted({k[:-len("_coverage")] for k in results_dictionary if k.endswith("_coverage")})
+    df_long = melt_results_for_cross_dataset_plot(df_results, methods)
+    if not df_long.empty:
+        plot_cross_dataset_pareto(
+            df_long,
+            title="Performance of conformal prediction methods across datasets",
+            save_path=os.path.join(results_folder, "cross_dataset_pareto.png"))
 
 
 if __name__ == "__main__":
