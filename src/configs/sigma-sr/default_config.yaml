@@ -13,23 +13,24 @@ predictor_params:
     oob_score: True
 
 data_augmentation:
-    sigma_knn_dist: True
-    sigma_knn_std: True
-    sigma_knn_res: True
-    sigma_var: True
+    sigma_knn_dist: False
+    sigma_knn_std: False
+    sigma_knn_res: False
+    sigma_var: False
 
 loss_functions: [bin_crossfit]
+lambda_cov : 500
 ncp_knn_k: 25
 
 sr_params:
     npopulations: 31
     population_size: 30
-    niterations: 100
+    niterations: 10
     binary_operators: ["+", "-", "*", "/"]
-    unary_operators: ["sin", "cos", "log", "exp"]
+    unary_operators: ["log", "exp"]
     nested_constraints: {
-        "sin": {"cos": 0, "sin": 0}, 
-        "cos": {"cos": 0, "sin": 0},
+        # "sin": {"cos": 0, "sin": 0}, 
+        # "cos": {"cos": 0, "sin": 0},
         "log": {"log": 0},
         "exp": {"exp": 0}
     }
