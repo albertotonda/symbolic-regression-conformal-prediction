@@ -242,8 +242,15 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
         equation_binned_stats = {}
         for idx in range(len(df_hof)):
+            def sigma_f(X, idx=idx):
+                # equation predicts log(sigma); an equation using its own "exp"
+                # node can overflow once exponentiated here, so clip in
+                # log-space first.
+                log_sigma = sigma_predictor.equations_["lambda_format"][idx](X)
+                return np.exp(np.clip(log_sigma, -50.0, 50.0))
+
             de = DifficultyEstimator()
-            de.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.equations_["lambda_format"][idx](X)))
+            de.fit(X_train_sr, f=sigma_f)
             sigmas_cal_sr = de.apply(X_cal_sr)
             sigmas_test_sr = de.apply(X_test_sr)
 
