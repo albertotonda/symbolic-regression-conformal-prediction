@@ -284,8 +284,7 @@ def _(
     def compute_ci_stats(confidence_intervals):
         ci_amplitude_mean = np.nanmean((confidence_intervals[:,1] - confidence_intervals[:,0]))
         ci_amplitude_median = np.nanmedian((confidence_intervals[:,1] - confidence_intervals[:,0]))
-        # this expression below is a bit of a mess, but it's 1 if the measured
-        # value falls within the confidence intervals, and 0 otherwise (summed up, divided by n_samples)
+        # fraction of test points whose measured value falls within its interval
         coverage = np.nansum([1 if (y_test[i] >= confidence_intervals[i,0] and
                                y_test[i] <= confidence_intervals[i,1]) else 0
                         for i in range(len(y_test))]) / len(y_test)
@@ -306,8 +305,8 @@ def _(
     # Standard CP
     print("Computing CI for SCP...")
     base_regressor.calibrate(X_cal, y_cal)
-    sigmas_comp["conformal_predictor"] = np.ones(len(X_cal))
-    conf_intervals["conformal_predictor"] = base_regressor.predict_int(X_test, confidence=confidence)
+    sigmas_comp["standard_cp"] = np.ones(len(X_cal))
+    conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=confidence)
 
     # KNN distance
     print("Computing CI for knn_dist NCP...")
@@ -315,10 +314,10 @@ def _(
     de_knn_dist.fit(X=X_prop_train, scaler=True)
     de_knn_dist_oob = DifficultyEstimator()
     de_knn_dist_oob.fit(X=X_prop_train, scaler=True, oob=True)
-    sigmas_train["normalized_cp_knn_dist"] = de_knn_dist_oob.apply()
-    sigmas_cal["normalized_cp_knn_dist"] = de_knn_dist_oob.apply(X_cal)
-    sigmas_test["normalized_cp_knn_dist"] = de_knn_dist_oob.apply(X_test)
-    conf_intervals["normalized_cp_knn_dist"], sigmas_comp["normalized_cp_knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, confidence)
+    sigmas_train["knn_dist"] = de_knn_dist_oob.apply()
+    sigmas_cal["knn_dist"] = de_knn_dist_oob.apply(X_cal)
+    sigmas_test["knn_dist"] = de_knn_dist_oob.apply(X_test)
+    conf_intervals["knn_dist"], sigmas_comp["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # KNN std
     print("Computing CI for knn_std NCP...")
@@ -326,10 +325,10 @@ def _(
     de_knn_std.fit(X=X_prop_train, y=y_prop_train, scaler=True)
     de_knn_std_oob = DifficultyEstimator()
     de_knn_std_oob.fit(X=X_prop_train, y=y_prop_train, scaler=True, oob=True)
-    sigmas_train["normalized_cp_knn_std"] = de_knn_std_oob.apply()
-    sigmas_cal["normalized_cp_knn_std"] = de_knn_std_oob.apply(X_cal)
-    sigmas_test["normalized_cp_knn_std"] = de_knn_std_oob.apply(X_test)
-    conf_intervals["normalized_cp_knn_std"], sigmas_comp["normalized_cp_knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, confidence)
+    sigmas_train["knn_std"] = de_knn_std_oob.apply()
+    sigmas_cal["knn_std"] = de_knn_std_oob.apply(X_cal)
+    sigmas_test["knn_std"] = de_knn_std_oob.apply(X_test)
+    conf_intervals["knn_std"], sigmas_comp["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # KNN out-of-bag residuals
     print("Computing CI for knn_res NCP...")
@@ -337,10 +336,10 @@ def _(
     de_knn_res.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True)
     de_knn_res_oob = DifficultyEstimator()
     de_knn_res_oob.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True, oob=True)
-    sigmas_train["normalized_cp_knn_res"] = de_knn_res_oob.apply()
-    sigmas_cal["normalized_cp_knn_res"] = de_knn_res_oob.apply(X_cal)
-    sigmas_test["normalized_cp_knn_res"] = de_knn_res_oob.apply(X_test)
-    conf_intervals["normalized_cp_knn_res"], sigmas_comp["normalized_cp_knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, confidence)
+    sigmas_train["knn_res"] = de_knn_res_oob.apply()
+    sigmas_cal["knn_res"] = de_knn_res_oob.apply(X_cal)
+    sigmas_test["knn_res"] = de_knn_res_oob.apply(X_test)
+    conf_intervals["knn_res"], sigmas_comp["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # Random Forest variance
     print("Computing CI for var NCP...")
@@ -348,15 +347,16 @@ def _(
     de_var.fit(X=X_prop_train, learner=learner_prop, scaler=True)
     de_var_oob = DifficultyEstimator()
     de_var_oob.fit(X=X_prop_train, learner=learner_prop, scaler=True, oob=True)
-    sigmas_train["normalized_cp_norm_var"] = de_var_oob.apply()
-    sigmas_cal["normalized_cp_norm_var"] = de_var.apply(X_cal) # For cal and test, use default (no oob) version, otherwise same oob trees are used instead of full model
-    sigmas_test["normalized_cp_norm_var"] = de_var.apply(X_test)
-    conf_intervals["normalized_cp_norm_var"], sigmas_comp["normalized_cp_norm_var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, confidence)
+    sigmas_train["var"] = de_var_oob.apply()
+    # cal/test use the non-oob fit's sigmas, same as sigmas_comp above
+    sigmas_cal["var"] = de_var.apply(X_cal)
+    sigmas_test["var"] = de_var.apply(X_test)
+    conf_intervals["var"], sigmas_comp["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, confidence)
 
     # Mondrian CP using variance
     print("Computing CI for MCP...")
     min_points = int(1 / (1-confidence) - 1) + 1
-    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas_comp["normalized_cp_norm_var"], min_points, random_seed)
+    bin_thresholds = _find_bin_thresholds_with_min_size(sigmas_comp["var"], min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
@@ -382,7 +382,7 @@ def _(
     X_cal_sr = np.concatenate((X_cal, X_cal_sr), axis=1)
     X_test_sr = np.concatenate((X_test, X_test_sr), axis=1)
 
-    methods = ["conformal_predictor", "normalized_cp_knn_dist", "normalized_cp_knn_std", "normalized_cp_knn_res", "normalized_cp_norm_var", "mondrian_cp"]
+    methods = ["standard_cp", "knn_dist", "knn_std", "knn_res", "var", "mondrian_cp"]
     print("SANITY CHECK")
     for m in methods:
         mean, median, coverage = compute_ci_stats(conf_intervals[m])
@@ -607,9 +607,7 @@ def _(plt):
         """
 
         """
-        # sort y_test values from small to big, along with y_pred_ci
-        # using a list is pretty slow, there is probably a smarter way to do this
-        # with numpy arrays, but the data set sizes should be small, so who cares
+        # sort (y, y_pred, ci) tuples by y ascending; list-based since these are small samples
         y_and_ci = []
         for i in range(0, len(y)) :
             y_and_ci.append([y[i], y_pred[i], y_pred_ci[i]])
@@ -617,12 +615,10 @@ def _(plt):
 
         fig, ax = plt.subplots()#figsize=(10,8))
 
-        # plot measured values and point predictions for y
         x = range(0, len(y))
         ax.scatter(x, [x[0] for x in y_and_ci], marker='o', color='green', label="Measured values")
         ax.scatter(x, [x[1] for x in y_and_ci], marker='x', color='orange', label="Predictions")
 
-        # visualize corresponding confidence intervals around point predictions
         ax.fill_between(x, [x[2][0] for x in y_and_ci], [x[2][1] for x in y_and_ci], color='orange', alpha=0.3)
 
         ax.set_xlabel("Samples sorted by increasing value of target")

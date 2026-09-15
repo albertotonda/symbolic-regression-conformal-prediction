@@ -40,10 +40,6 @@ at testing whether SR can find difficulty structure without leaning on the
   - `plot_sigma_distributions` — violin plot of each method's difficulty
     score, normalized by its own median (raw scales aren't comparable
     across estimator types).
-  - `plot_cross_dataset_pareto` (+ `melt_results_for_cross_dataset_plot` in
-    `evaluate.py`) — one (dataset, method) point per dot, cross-dataset
-    counterpart to the existing per-dataset `pareto.png`; called once at the
-    end of `run_all_tasks`.
   - Test-set sigmas (`sigmas_test`) are now saved for `symbolic_regression_*`
     too (previously only cal-set `sigmas_comp` was), needed for the
     size-stratified test-set coverage plots above.

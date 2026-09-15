@@ -29,21 +29,18 @@ if __name__ == "__main__" :
                          help="directory containing the results.csv produced by run_experiments.py")
     args = parser.parse_args()
 
-    # hard-coded values
     fitness_1_name = "_coverage"
     fitness_2_name = "_median"
 
     results_folder = args.results_folder
     results_file = "results.csv"
     df = pd.read_csv(os.path.join(results_folder, results_file))
-    
+
     # find the names for all methods, and the corresponding columns
     methods = dict()
-    
-    # first, get all the columns that either end with fitness_1 or fitness_2
+
     fitness_columns = [c for c in df.columns if c.endswith(fitness_1_name) or c.endswith(fitness_2_name)]
-    
-    # then, iterate over the columns and get names
+
     for fc in fitness_columns :
         if fc.find(fitness_1_name) != -1 :
             method = fc[:-len(fitness_1_name)]
@@ -55,26 +52,17 @@ if __name__ == "__main__" :
         
         methods[method].append(fc)
         
-    # data structure to collect the final statistics
     methods_statistics = { method : {"non-dominated" : 0, "dominated" : 0, "alone" : 0} for method in methods }
-    
-    # now, we iterate over all rows (representing performance on a data set),
-    # and mark the pareto optimality of each method
+
+    # each row represents performance on one data set
     for index, row in df.iterrows() :
-        
+
         print("Now analyzing dataset \"%s\"..." % row["dataset_name"])
         non_dominated_methods = []
-        
-        #print(points)
-        #if row["dataset_name"] == "red_wine" :
-        #    for i, method in enumerate(methods) :
-        #        print("Method: %s, point: (%s)" % (method, str(points[i])))
-        
-        # now, check if the point corresponding to a method is dominated
+
         for method in methods :
             method_point = (row[methods[method][0]], row[methods[method][1]])
-            #print("Method %s, point: %s" % (method, str(method_point)))
-            points = [(row[methods[other_method][0]], row[methods[other_method][1]]) 
+            points = [(row[methods[other_method][0]], row[methods[other_method][1]])
                       for other_method in methods if other_method != method]
             
             is_method_point_dominated = False
@@ -92,6 +80,5 @@ if __name__ == "__main__" :
         if len(non_dominated_methods) == 1 :
             methods_statistics[non_dominated_methods[0]]["alone"] += 1
             
-    # and now, some nice formatting for the results
     df_statistics = pd.DataFrame.from_dict(methods_statistics)
     df_statistics.to_csv(os.path.join(results_folder, "results-statistics.csv"))

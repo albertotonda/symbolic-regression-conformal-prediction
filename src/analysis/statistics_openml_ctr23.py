@@ -23,21 +23,17 @@ from utils.data import load_and_preprocess_openml_task
 
 if __name__ == "__main__" :
 
-    # hard-coded variables
     random_seed = 42
     use_predefined_splits = False
-    prng = random.Random() # pseudo-random number generator will be useful later
+    prng = random.Random()
     prng.seed(random_seed)
     regressor_classes = [RandomForestRegressor, XGBRegressor]
 
     # load CTR23 regression benchmark suite
     suite = openml.study.get_suite(353)
 
-    # get all task_ids, so that if there is a crash we can easily restart
-    # by skipping the first results
     task_ids = [t for t in suite.tasks]
 
-    # prepare data structure to store information
     statistics_dictionary = {'task_id' : [], 'dataset_name' : [], 'target_name': [], 'n_samples' : [],
                              'n_features' : [], 'missing_data' : [], 'categorical_features' : [],}
     
@@ -54,8 +50,7 @@ if __name__ == "__main__" :
         # data that's already been cleaned/encoded
         raw_task = openml.tasks.get_task(task_id, download_splits=True)
         df_X_raw, df_y_raw = raw_task.get_X_and_y('dataframe')
-        # here below there is a sum().sum() because it is adding up missing values
-        # in rows AND THEN in columns
+        # sum() per column, then sum() across columns, for a single total count
         missing_data = df_X_raw.isnull().sum().sum() + df_y_raw.isnull().sum()
         categorical_features = df_X_raw.select_dtypes(include=['category', 'object']).shape[1]
 
@@ -63,32 +58,25 @@ if __name__ == "__main__" :
         X = df_X.values
         y = df_y.values
 
-        # let's also get the name of the dataset
         dataset = task.get_dataset()
         print("Task %d is applied to data set \"%s\" (id=%d)" % (task_id, dataset.name, dataset.dataset_id))
         
         for regressor_class in regressor_classes :
-            # mean performance of regressor 
             regressor_name = regressor_class.__name__
             regressor_r2 = []
             regressor_mse = []
             
             for fold in range(0, 10) :
                 print("Evaluating \"%s\" performance on fold %d..." % (regressor_name, fold))
-                # initialize regressor
                 regressor = regressor_class(n_estimators=500, random_state=random_seed, n_jobs=-1)
-                
+
                 if use_predefined_splits :
-                    # get splits for N-fold cross-validation
-                    # NOTE: this ignores repetitions, for a few data sets the evaluation
-                    # is something like 10x(10-fold cross-validation), and here we are only
-                    # performing one
+                    # for data sets where OpenML repeats the CV (e.g. 10x 10-fold),
+                    # this uses only the first repetition, not all of them
                     train_index, test_index = task.get_train_test_split_indices(fold=fold)
                 else :
-                    # otherwise, we go for a nice 50/50 split, just like the funny
-                    # guys that use conformal predictors; we need to instantiate
-                    # the object managing the cross-validation with a different random
-                    # seed at each iteration, to avoid issues
+                    # 50/50 train/test split via 2-fold KFold; a fresh random seed
+                    # each iteration so successive folds don't reuse the same split
                     cv_random_seed = random.randint(0, 10000)
                     kf = KFold(n_splits=2, shuffle=True, random_state=cv_random_seed)
                     folds = [(train_index, test_index) for train_index, test_index in kf.split(X, y)]
@@ -97,7 +85,6 @@ if __name__ == "__main__" :
                 X_train, X_test = X[train_index], X[test_index]
                 y_train, y_test = y[train_index], y[test_index]
                 
-                # normalization (it should not impact performance at all, let's see)
                 scaler_X = StandardScaler()
                 scaler_y = StandardScaler()
                 
@@ -115,13 +102,6 @@ if __name__ == "__main__" :
             statistics_dictionary['R2_' + regressor_name].append("%.2f +/- %.2f" % (np.mean(regressor_r2), np.std(regressor_r2)))
             statistics_dictionary['MSE_' + regressor_name].append("%.2f +/- %.2f" % (np.mean(regressor_mse), np.std(regressor_mse)))
             
-        # what I am interested in knowing:
-        # number of samples
-        # number of features
-        # name of the target
-        # missing data?
-        # categorical variables?
-        # mean performance of random forest?
         statistics_dictionary['task_id'].append(task_id)
         statistics_dictionary['dataset_name'].append(dataset.name)
         statistics_dictionary['target_name'].append(task.target_name)

@@ -37,28 +37,14 @@ os.makedirs(task_folder, exist_ok=True)
 
 dataset = SimpleNamespace(name="synthetic_noise_test")
 
-# 1. Generate a synthetic dataset with a known, closed-form heteroscedastic
-# noise law.
-#
-# x1, x2 drive the residual noise scale via sigma_true; x3, x4 drive the
-# mean function f. Keeping these feature sets disjoint means any pattern the
-# base regressor's OOB residuals show w.r.t. x1, x2 is purely the designed-in
-# noise, not leakage from the regressor's own fit error on f.
-#
-# sigma_true = exp(x1 + b * x2) is strictly positive by construction (no
-# additive floor needed). The bin_crossfit loss below already has the tree
-# predict log(sigma) and applies sigma = exp(log_sigma) itself, so the SR
-# tree's actual target is log(sigma_true) = x1 + b * x2 -- a plain linear
-# combination, discoverable with just "+"/"*", no unary operators required.
-# This is the simplest possible positive-control case: if SR still can't
-# recover it from raw features, that's strong evidence of the noise-floor/
-# smoothing problem rather than of this particular functional form being
-# too hard to search for.
-#
-# Constants tuned (see NOTES.md) so the base regressor lands at a realistic,
-# non-degenerate R² (~0.44) with a clearly detectable but noisy relationship
-# between |residual| and sigma_true (corr ~0.55) -- neither an unlearnable
-# pure-noise dataset nor a trivial perfect fit.
+# 1. Generate a synthetic heteroscedastic dataset. x1, x2 set the noise scale
+# sigma_true; x3, x4 set the mean function f, kept disjoint so the base
+# regressor's OOB residuals reflect only the designed-in noise, not leakage
+# from its own fit error on f. sigma_true = exp(x1 + b*x2) is positive by
+# construction and its log is a plain linear combination of x1, x2, matching
+# what the bin_crossfit loss below expects (tree predicts log(sigma)).
+# Constants tuned (see NOTES.md) for a realistic R² (~0.44) and a noisy but
+# detectable correlation (~0.55) between |residual| and sigma_true.
 n_samples = 5000
 
 x1 = rng.uniform(-1, 1, n_samples)
@@ -116,8 +102,8 @@ residuals_prop_oob = y_prop_train - y_pred_oob
 # Standard CP
 print("Computing CI for SCP...")
 base_regressor.calibrate(X_cal, y_cal)
-sigmas_comp["conformal_predictor"] = np.ones(len(X_cal))
-conf_intervals["conformal_predictor"] = base_regressor.predict_int(X_test, confidence=confidence)
+sigmas_comp["standard_cp"] = np.ones(len(X_cal))
+conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=confidence)
 
 # KNN distance
 # de.apply(X) on a real X doesn't depend on the oob flag (only the no-arg
@@ -127,8 +113,8 @@ conf_intervals["conformal_predictor"] = base_regressor.predict_int(X_test, confi
 print("Computing CI for knn_dist NCP...")
 de_knn_dist = fit_difficulty_estimator(X_prop_train, "knn_dist", oob=True)
 intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, confidence)
-conf_intervals["normalized_cp_knn_dist"] = intervals
-sigmas_comp["normalized_cp_knn_dist"] = comp_sigma_cal
+conf_intervals["knn_dist"] = intervals
+sigmas_comp["knn_dist"] = comp_sigma_cal
 sigmas_train["knn_dist"] = de_knn_dist.apply()
 sigmas_cal["knn_dist"] = comp_sigma_cal
 sigmas_test["knn_dist"] = de_knn_dist.apply(X_test)
@@ -137,8 +123,8 @@ sigmas_test["knn_dist"] = de_knn_dist.apply(X_test)
 print("Computing CI for knn_std NCP...")
 de_knn_std = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train, oob=True)
 intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, confidence)
-conf_intervals["normalized_cp_knn_std"] = intervals
-sigmas_comp["normalized_cp_knn_std"] = comp_sigma_cal
+conf_intervals["knn_std"] = intervals
+sigmas_comp["knn_std"] = comp_sigma_cal
 sigmas_train["knn_std"] = de_knn_std.apply()
 sigmas_cal["knn_std"] = comp_sigma_cal
 sigmas_test["knn_std"] = de_knn_std.apply(X_test)
@@ -147,8 +133,8 @@ sigmas_test["knn_std"] = de_knn_std.apply(X_test)
 print("Computing CI for knn_res NCP...")
 de_knn_res = fit_difficulty_estimator(X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop, oob=True)
 intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, confidence)
-conf_intervals["normalized_cp_knn_res"] = intervals
-sigmas_comp["normalized_cp_knn_res"] = comp_sigma_cal
+conf_intervals["knn_res"] = intervals
+sigmas_comp["knn_res"] = comp_sigma_cal
 sigmas_train["knn_res"] = de_knn_res.apply()
 sigmas_cal["knn_res"] = comp_sigma_cal
 sigmas_test["knn_res"] = de_knn_res.apply(X_test)
@@ -160,8 +146,8 @@ sigmas_test["knn_res"] = de_knn_res.apply(X_test)
 print("Computing CI for var NCP...")
 de_var = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop)
 intervals, comp_sigma_cal = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, confidence)
-conf_intervals["normalized_cp_norm_var"] = intervals
-sigmas_comp["normalized_cp_norm_var"] = comp_sigma_cal
+conf_intervals["var"] = intervals
+sigmas_comp["var"] = comp_sigma_cal
 de_var_oob = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop, oob=True)
 sigmas_train["var"] = de_var_oob.apply()
 sigmas_cal["var"] = comp_sigma_cal  # same de_var.apply(X_cal) already computed above
@@ -170,14 +156,14 @@ sigmas_test["var"] = de_var.apply(X_test)
 # Mondrian CP using variance
 print("Computing CI for MCP...")
 min_points = int(1 / (1 - confidence) - 1) + 1
-bin_thresholds = find_bin_thresholds_with_min_size(sigmas_comp["normalized_cp_norm_var"], min_points, random_seed)
+bin_thresholds = find_bin_thresholds_with_min_size(sigmas_comp["var"], min_points, random_seed)
 number_of_bins = len(bin_thresholds) - 1
 print(f"Number of Mondrian bins: {number_of_bins}")
 
 # the "mc" argument for calibrate()/predict_int() internally takes X as its
 # only parameter; reuse the variance sigmas already computed above for
 # X_cal/X_test instead of recomputing a full RF-variance pass over them.
-sigma_var_cache = {id(X_cal): sigmas_comp["normalized_cp_norm_var"], id(X_test): sigmas_test["var"]}
+sigma_var_cache = {id(X_cal): sigmas_comp["var"], id(X_test): sigmas_test["var"]}
 
 
 def mondrian_categories(X):
@@ -234,7 +220,7 @@ for loss_name, loss_kwargs, y_train_sr in sigma_losses:
         **loss_kwargs,
     )
     sigma_predictor.fit(X_train_sr, y_train_sr)
-    log_equations(sigma_predictor, task_folder, f"symbolic_regression_{loss_name}")
+    log_equations(sigma_predictor, task_folder, f"sr_{loss_name}")
 
     de_sr = DifficultyEstimator()
     de_sr.fit(X_train_sr, f=lambda X: np.exp(sigma_predictor.predict(X)), scaler=True)

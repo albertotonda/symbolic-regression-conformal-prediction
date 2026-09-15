@@ -39,9 +39,10 @@ from pysr import PySRRegressor
 
 import openml
 
+from utils.utils import log_equations, setup_results_folder
 from utils.config import load_config, dump_config
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import compute_ci_stats, log_equations, setup_results_folder
+from utils.evaluate import compute_ci_stats
 from utils.plotting import plot_confidence_intervals, plot_pareto
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import penalize_smaller_loss_julia
@@ -70,10 +71,10 @@ REGRESSOR_MODELS = {
 # into the sigmas_cal/sigmas_test dicts consumed by symbolic regression) to
 # the task_results key its normalized CP intervals are stored under
 NORMALIZED_CP_RESULT_KEYS = {
-    "knn_dist": "normalized_cp_knn_dist",
-    "knn_std": "normalized_cp_knn_std",
-    "knn_oob_res": "normalized_cp_knn_res",
-    "ensemble_var": "normalized_cp_norm_var",
+    "knn_dist": "knn_dist",
+    "knn_std": "knn_std",
+    "knn_oob_res": "knn_res",
+    "ensemble_var": "var",
 }
 
 
@@ -90,7 +91,6 @@ def train_base_regressor(X_prop_train, y_prop_train, X_cal, y_cal, X_test, y_tes
     regressor = WrapRegressor(base_regressor)
     regressor.fit(X_prop_train, y_prop_train)
 
-    # get predictions for the test set and calibration set from the learner
     y_cal_pred = regressor.predict(X_cal)
     y_test_pred = regressor.predict(X_test)
     r2_test = r2_score(y_test, y_test_pred)
@@ -187,12 +187,10 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
     that do not cover the true value more heavily than it penalizes wide
     intervals.
     """
-    # step 1: prepare data sets with all sigmas and stuff on calibration set
-    # and test set; these will be a special version, just for symbolic regression
+    # SR feature matrix: point prediction, then one column per sigma key
     X_train_sr = np.zeros((y_cal.shape[0], len(sigmas_cal)+1), dtype=np.float32)
     X_test_sr = np.zeros((y_test.shape[0], len(sigmas_cal)+1), dtype=np.float32)
 
-    # add point predictions
     X_train_sr[:,0] = y_cal_pred
     X_test_sr[:,0] = y_test_pred
 
@@ -200,20 +198,12 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
         X_train_sr[:,i+1] = sigmas_cal[key]
         X_test_sr[:,i+1] = sigmas_test[key]
 
-    # TODO: information used by the Mondrian conformal predictors is not immediately
-    # applicable, unless I use something about the bins? to be explored
-    # finally, add the feature information from the original data set
+    # TODO: Mondrian bin information is not incorporated as a feature yet
     X_train_sr = np.concatenate((X_train_sr, X_cal), axis=1)
     X_test_sr = np.concatenate((X_test_sr, X_test), axis=1)
 
-    # finally, we need a target (y) for our problem of confidence interval
-    # regression; we can obtain that by computing the absolute difference
-    # between the y_true and the y_pred for a dataset
     y_train_sr = abs(y_cal - y_cal_pred)
 
-    # now, for the more complex part: we can use a PySRRegressor, but we
-    # need to change the fitness function! the fitness function is described
-    # as a string (lines of Julia), defined in losses.py
     ci_regressor = PySRRegressor(
         tournament_selection_n=config.sr_params.tournament_selection_n,
         population_size=config.sr_params.population_size, # must be >= topn (default 12)
@@ -222,7 +212,7 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
         unary_operators=config.sr_params.unary_operators,
         loss_function=penalize_smaller_loss_julia(config.confidence),
         temp_equation_file=True, # does not clutter directory with temporary files
-        verbosity=1, # can also be set to 0, it should be ok
+        verbosity=1,
         random_state=random_seed,
         deterministic=True,
         parallelism="serial"
@@ -244,7 +234,6 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
         ci_test[i,0] = y_test_pred[i] - ci_amplitude_test[i]
         ci_test[i,1] = y_test_pred[i] + ci_amplitude_test[i]
 
-    # save the predictor as a pickle file
     with open(os.path.join(task_folder, SR_MODEL_FILENAME), "wb") as fp:
         pickle.dump(ci_regressor, fp)
 
@@ -310,10 +299,9 @@ def run_single_task(dataset, task_folder, config, random_seed):
     task_results = {}
 
     # Standard CP
-    task_results["conformal_predictor"] = regressor.predict_int(X_test, confidence=config.confidence)
+    task_results["standard_cp"] = regressor.predict_int(X_test, confidence=config.confidence)
 
-    # now we need to access the wrapped learner to re-use it for the other
-    # conformal predictors, but it's not difficult
+    # the other CP methods below reuse the wrapped learner directly
     learner_prop = regressor.learner
 
     # normalized CP: one variant per difficulty-estimation strategy applicable
@@ -336,14 +324,12 @@ def run_single_task(dataset, task_folder, config, random_seed):
         task_results["mondrian_cp"] = intervals_mond
         print(f"Number of Mondrian bins: {number_of_bins}")
 
-    # proposed approach: symbolic regression intervals, using all sigmas
+    # Symbolic regression CP
     task_results["symbolic_regression_cp"] = run_symbolic_regression(
         X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pred,
         sigmas_cal, sigmas_test,
         feature_names, task_folder, config, random_seed)
 
-    # post-processing of the results for the different confidence intervals
-    # statistics we are interested in: coverage, mean size, median size
     ci_means = {}
     ci_medians = {}
     coverages = {}
@@ -401,6 +387,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = load_config("interval-sr", args.config)
 
-    # let's run several experiments in a row, with different random seeds
     for random_seed in config.random_seeds:
         run_all_tasks(config, random_seed)

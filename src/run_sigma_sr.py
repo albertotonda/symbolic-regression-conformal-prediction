@@ -27,16 +27,13 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
+from utils.utils import setup_results_folder
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import (
-    compute_ci_stats, setup_results_folder,
-    compute_binned_coverage_width, melt_results_for_cross_dataset_plot,
-)
+from utils.evaluate import compute_ci_stats, compute_binned_ci_stats
 from utils.plotting import (
     plot_confidence_intervals, plot_pareto, plot_target_distribution, plot_pareto_fronts,
-    plot_binned_sigma_metric, plot_sigma_distributions, plot_sigma_vs_residual,
-    plot_equation_performance_vs_complexity, plot_cross_dataset_pareto,
-    METHOD_COLORS, translations, _FALLBACK_COLOR,
+    plot_binned_sigma_metric, plot_sigma_distributions,
+    plot_equation_performance_vs_complexity, plot_sigma_vs_residuals,
 )
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
@@ -45,18 +42,6 @@ from utils.config import load_config, dump_config
 # Keys must match custom operator names in sr_params.unary_operators.
 SIGMA_SR_EXTRA_SYMPY_MAPPINGS = {
     "logm": lambda x: sympy.log(sympy.Abs(x) + 1e-8),
-}
-
-# sigmas_train/cal/test are keyed by the short difficulty-estimator name
-# (set in the augmentation blocks below); conf_intervals/sigmas_comp are
-# keyed by the corresponding CP method name -- this maps one to the other
-# for the plots that need both a method's difficulty score and its
-# intervals together (size-stratified coverage).
-SIGMA_TEST_KEY_TO_METHOD = {
-    "knn_dist": "normalized_cp_knn_dist",
-    "knn_std": "normalized_cp_knn_std",
-    "knn_res": "normalized_cp_knn_res",
-    "var": "normalized_cp_norm_var",
 }
 
 def extract_all_equations(model) -> pd.DataFrame:
@@ -135,99 +120,85 @@ def run_single_task(dataset, task_folder, config, random_seed):
     print(f'R² on test set: {r2:.4f}')
 
     learner_prop = base_regressor.learner
-    sigmas_train = {}
-    sigmas_cal = {}
-    sigmas_test = {}
-    sigmas_comp = {}
+    sigmas_train_oob = {}
+    sigmas_cal_oob = {}
+    sigmas_test_oob = {}
+    sigmas_comp = {} # sigmas on test set for comparison
     conf_intervals = {}
 
     # Standard CP
     base_regressor.calibrate(X_cal, y_cal)
-    sigmas_comp["conformal_predictor"] = np.ones(len(X_cal))
-    conf_intervals["conformal_predictor"] = base_regressor.predict_int(X_test, confidence=config.confidence)
+    sigmas_comp["standard_cp"] = np.ones(len(X_test))
+    conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=config.confidence)
 
     # KNN distance
     # de.apply(X) on a real X doesn't depend on the oob flag for KNN-based methods, so a
     # single fit serves both compute_normalized_intervals and augmentation.
     augment_knn_dist = config.data_augmentation.sigma_knn_dist
     de_knn_dist = fit_difficulty_estimator(X_prop_train, "knn_dist", oob=augment_knn_dist)
-    intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, config.confidence)
-    conf_intervals["normalized_cp_knn_dist"] = intervals
-    sigmas_comp["normalized_cp_knn_dist"] = comp_sigma_cal
+    conf_intervals["knn_dist"], sigma_cal_knn, sigmas_comp["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_dist:
-        sigmas_train["knn_dist"] = de_knn_dist.apply()
-        sigmas_cal["knn_dist"] = comp_sigma_cal
-        sigmas_test["knn_dist"] = de_knn_dist.apply(X_test)
+        sigmas_train_oob["knn_dist"] = de_knn_dist.apply()
+        sigmas_cal_oob["knn_dist"] = sigma_cal_knn
+        sigmas_test_oob["knn_dist"] = sigmas_comp["knn_dist"]
 
     # KNN std
     augment_knn_std = config.data_augmentation.sigma_knn_std
     de_knn_std = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train, oob=augment_knn_std)
-    intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, config.confidence)
-    conf_intervals["normalized_cp_knn_std"] = intervals
-    sigmas_comp["normalized_cp_knn_std"] = comp_sigma_cal
+    conf_intervals["knn_std"], sigma_cal_std, sigmas_comp["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_std:
-        sigmas_train["knn_std"] = de_knn_std.apply()
-        sigmas_cal["knn_std"] = comp_sigma_cal
-        sigmas_test["knn_std"] = de_knn_std.apply(X_test)
+        sigmas_train_oob["knn_std"] = de_knn_std.apply()
+        sigmas_cal_oob["knn_std"] = sigma_cal_std
+        sigmas_test_oob["knn_std"] = sigmas_comp["knn_std"]
 
     # KNN out-of-bag residuals
     augment_knn_res = config.data_augmentation.sigma_knn_res
     de_knn_res = fit_difficulty_estimator(X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop, oob=augment_knn_res)
-    intervals, comp_sigma_cal = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence)
-    conf_intervals["normalized_cp_knn_res"] = intervals
-    sigmas_comp["normalized_cp_knn_res"] = comp_sigma_cal
+    conf_intervals["knn_res"], sigma_cal_res, sigmas_comp["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_res:
-        sigmas_train["knn_res"] = de_knn_res.apply()
-        sigmas_cal["knn_res"] = comp_sigma_cal
-        sigmas_test["knn_res"] = de_knn_res.apply(X_test)
+        sigmas_train_oob["knn_res"] = de_knn_res.apply()
+        sigmas_cal_oob["knn_res"] = sigma_cal_res
+        sigmas_test_oob["knn_res"] = sigmas_comp["knn_res"]
 
     # Random Forest variance
     # unlike the KNN estimators above, de.apply(X) for the variance estimator
     # DOES depend on the oob flag (the oob branch expects X sized to the
     # training set), so cal/test must keep using the separate non-oob fit.
     de_var = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop)
-    intervals, comp_sigma_cal = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, config.confidence)
-    conf_intervals["normalized_cp_norm_var"] = intervals
-    sigmas_comp["normalized_cp_norm_var"] = comp_sigma_cal
+    conf_intervals["var"], sigma_cal_var, sigmas_comp["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if config.data_augmentation.sigma_var:
         de_var_oob = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop, oob=True)
-        sigmas_train["var"] = de_var_oob.apply()
-        sigmas_cal["var"] = comp_sigma_cal # For cal and test, use default (no oob) version, otherwise same oob trees are used instead of full model
-        sigmas_test["var"] = de_var.apply(X_test)
+        sigmas_train_oob["var"] = de_var_oob.apply()
+        sigmas_cal_oob["var"] = sigma_cal_var
+        sigmas_test_oob["var"] = sigmas_comp["var"]
 
     # Mondrian CP using variance
     min_points = int(1 / (1-config.confidence) - 1) + 1
-    bin_thresholds = find_bin_thresholds_with_min_size(sigmas_comp["normalized_cp_norm_var"], min_points, random_seed)
+    bin_thresholds = find_bin_thresholds_with_min_size(sigma_cal_var, min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
     # the "mc" argument for calibrate()/predict_int() internally takes X as
     # its only parameter; reuse the variance sigmas already computed above
-    # for X_cal (and X_test, when the var augmentation ran) instead of
-    # recomputing a full RF-variance pass over them.
-    sigma_var_cache = {id(X_cal): sigmas_comp["normalized_cp_norm_var"]}
-    if "var" in sigmas_test:
-        sigma_var_cache[id(X_test)] = sigmas_test["var"]
-
+    # for X_cal and X_test instead of recomputing a full RF-variance pass
+    # over them.
     def mondrian_categories(X):
-        sigmas = sigma_var_cache.get(id(X))
-        if sigmas is None:
-            sigmas = de_var.apply(X)
+        sigmas = de_var.apply(X)
         return binning(sigmas, bins=bin_thresholds, seed=random_seed)
 
     regressor_mond = WrapRegressor(learner_prop)
     regressor_mond.calibrate(X_cal, y_cal, mc=mondrian_categories)
-    sigmas_comp["mondrian_cp"] = np.ones(len(X_cal))
+    sigmas_comp["mondrian_cp"] = np.ones(len(X_test))
     conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=config.confidence)
 
     # augment input using sigmas
-    X_train_sr = np.zeros((X_prop_train.shape[0], len(sigmas_train)), dtype=np.float32)
-    X_cal_sr = np.zeros((X_cal.shape[0], len(sigmas_cal)), dtype=np.float32)
-    X_test_sr = np.zeros((X_test.shape[0], len(sigmas_test)), dtype=np.float32)
-    for i, key in enumerate(sigmas_train.keys()):
-            X_train_sr[:,i] = sigmas_train[key]
-            X_cal_sr[:,i] = sigmas_cal[key]
-            X_test_sr[:,i] = sigmas_test[key]
+    X_train_sr = np.zeros((X_prop_train.shape[0], len(sigmas_train_oob)), dtype=np.float32)
+    X_cal_sr = np.zeros((X_cal.shape[0], len(sigmas_cal_oob)), dtype=np.float32)
+    X_test_sr = np.zeros((X_test.shape[0], len(sigmas_test_oob)), dtype=np.float32)
+    for i, key in enumerate(sigmas_train_oob.keys()):
+            X_train_sr[:,i] = sigmas_train_oob[key]
+            X_cal_sr[:,i] = sigmas_cal_oob[key]
+            X_test_sr[:,i] = sigmas_test_oob[key]
     X_train_sr = np.concatenate((X_prop_train, X_train_sr), axis=1)
     X_cal_sr = np.concatenate((X_cal, X_cal_sr), axis=1)
     X_test_sr = np.concatenate((X_test, X_test_sr), axis=1)
@@ -235,17 +206,17 @@ def run_single_task(dataset, task_folder, config, random_seed):
     y_pred_oob = learner_prop.oob_prediction_
     residuals_prop_oob = y_prop_train - y_pred_oob
 
-    y_raw_residual = residuals_prop_oob
+    abs_res_test = np.abs(y_test_pred - y_test)
 
     sigma_losses = {
-        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), y_raw_residual),
+        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), residuals_prop_oob),
     }
 
     for loss_name in config.loss_functions:
         loss_kwargs, y_train_sr = sigma_losses[loss_name]
         sigma_predictor = PySRRegressor(
             model_selection="score",
-            tournament_selection_n=15, # default 15
+            tournament_selection_n=15,
             populations=config.sr_params.npopulations, # default 31
             population_size=config.sr_params.population_size, # must be >= topn:=12 (default 27)
             niterations=config.sr_params.niterations, # default 100
@@ -253,14 +224,13 @@ def run_single_task(dataset, task_folder, config, random_seed):
             unary_operators=config.sr_params.unary_operators,
             nested_constraints=config.sr_params.nested_constraints,
             extra_sympy_mappings=SIGMA_SR_EXTRA_SYMPY_MAPPINGS,
-            verbosity=1, # can also be set to 0, it should be ok
+            verbosity=1,
             random_state=random_seed,
             output_directory=task_folder,
             run_id="checkpoints",
             tempdir=task_folder,
             **loss_kwargs,
         )
-
 
         sigma_predictor.fit(X_train_sr, y_train_sr)
 
@@ -289,17 +259,16 @@ def run_single_task(dataset, task_folder, config, random_seed):
             )
 
             if df_hof.iloc[idx]["Chosen"]:
-                conf_intervals[f"symbolic_regression_{loss_name}"] = ci_intervals
-                sigmas_comp[f"symbolic_regression_{loss_name}"] = sigmas_cal_sr
-                sigmas_test[f"symbolic_regression_{loss_name}"] = sigmas_test_sr
+                conf_intervals[f"sr_{loss_name}"] = ci_intervals
+                sigmas_comp[f"sr_{loss_name}"] = sigmas_test_sr
 
             ci_mean, ci_median, coverage = compute_ci_stats(ci_intervals, y_test)
             row_label = df_hof.index[idx]
             df_hof.loc[row_label, "ci_median"] = ci_median
             df_hof.loc[row_label, "ci_mean"] = ci_mean
             df_hof.loc[row_label, "coverage"] = coverage
-            df_hof.at[row_label, "sigmas"] = list(sigmas_cal_sr)
-            equation_binned_stats[row_label] = compute_binned_coverage_width(
+            df_hof.at[row_label, "sigmas"] = list(sigmas_test_sr)
+            equation_binned_stats[row_label] = compute_binned_ci_stats(
                 sigmas_test_sr, ci_intervals, y_test, min_points, random_seed)
 
         df_hof.to_csv(sigma_predictor.get_equation_file())
@@ -315,24 +284,28 @@ def run_single_task(dataset, task_folder, config, random_seed):
             df_hof, loss_name, dataset.name,
             os.path.join(task_folder, f"equation_performance_{loss_name}.png"))
 
-        # sigma-binned coverage/width across every Hall-of-Fame equation for this loss,
-        # colored by complexity (same convention as plot_equation_performance_vs_complexity)
-        equation_complexity = {k: k for k in equation_binned_stats}
-        equation_highlighted = [k for k in df_hof.index if df_hof.loc[k]["Chosen"]]
+        # sigma-binned coverage/width across every Hall-of-Fame equation for this loss
+        chosen = [k for k in df_hof.index if df_hof.loc[k]["Chosen"]]
         plot_binned_sigma_metric(
             binned_stats=equation_binned_stats,
             metric="coverage",
             save_path=os.path.join(task_folder, f"equation_binned_sigma_coverage_{loss_name}.png"),
-            highlighted_keys=equation_highlighted,
-            complexity=equation_complexity,
+            highlighted_keys=chosen,
+            use_complexity=True
             )
         plot_binned_sigma_metric(
             binned_stats=equation_binned_stats,
             metric="median_width",
             save_path=os.path.join(task_folder, f"equation_binned_sigma_median_width_{loss_name}.png"),
-            highlighted_keys=equation_highlighted,
-            complexity=equation_complexity,
+            highlighted_keys=chosen,
+            use_complexity=True
             )
+
+        # per-equation sigmas vs. base learner's absolute residuals,
+        # across every Hall-of-Fame equation for this loss
+        plot_sigma_vs_residuals(
+            df_hof, abs_res_test, loss_name, dataset.name,
+            os.path.join(task_folder, f"sigmas_vs_residuals_{loss_name}.png"))
 
     ci_means = {}
     ci_medians = {}
@@ -353,55 +326,30 @@ def run_single_task(dataset, task_folder, config, random_seed):
         save_path=os.path.join(task_folder, "pareto.png"))
 
     # size-stratified coverage/width, for methods with a real fitted difficulty
-    # estimator (test-set sigmas are only ever populated for those, see
-    # sigmas_test above and SIGMA_TEST_KEY_TO_METHOD)
+    # estimator (sigmas_test_comp is keyed by difficulty-estimator name,
+    # mapped to its CP method via SIGMA_TEST_KEY_TO_METHOD)
     binned_stats = {}
-    for key, sigma_arr in sigmas_test.items():
-        method = SIGMA_TEST_KEY_TO_METHOD.get(key, key)
+    for method, sigma_arr in sigmas_comp.items():
         if method in conf_intervals:
-            binned_stats[method] = compute_binned_coverage_width(
+            binned_stats[method] = compute_binned_ci_stats(
                 sigma_arr, conf_intervals[method], y_test, min_points, random_seed)
     if binned_stats:
         plot_binned_sigma_metric(
             binned_stats=binned_stats,
             metric="coverage",
             save_path=os.path.join(task_folder, "method_binned_sigma_coverage.png"),
-            labels=translations,
             )
         plot_binned_sigma_metric(
             binned_stats=binned_stats,
             metric="median_width",
             save_path=os.path.join(task_folder, "method_binned_sigma_median_width.png"),
-            labels=translations,
             )
 
-    # marginal difficulty-score distributions, same method scope as above plus
-    # every SR loss function (sigmas_comp is populated unconditionally, unlike sigmas_test)
-    sr_methods = [f"symbolic_regression_{loss_name}" for loss_name in config.loss_functions]
-    sigma_dist_methods = list(SIGMA_TEST_KEY_TO_METHOD.values()) + sr_methods
-    sigmas_for_dist = {m: sigmas_comp[m] for m in sigma_dist_methods if m in sigmas_comp}
-    if sigmas_for_dist:
-        dist_colors = {m: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m in sigmas_for_dist}
-        dist_labels = {m: translations.get(m, m) for m in sigmas_for_dist}
-        plot_sigma_distributions(
-            sigmas_for_dist, f"Difficulty-score distributions on \"{dataset.name}\"",
-            os.path.join(task_folder, "sigma_distributions.png"),
-            colors=dist_colors, labels=dist_labels)
-
-    # does each method's difficulty score actually track realized test-set
-    # error? (raw-point counterpart to method_binned_sigma_* above, which
-    # shows the same relationship after binning); scope matches binned_stats
-    # -- only methods with a real fitted difficulty estimator have test-set sigmas
-    abs_residuals_test = np.abs(y_test - y_test_pred)
-    # sigma_vs_residual = {SIGMA_TEST_KEY_TO_METHOD.get(key, key): sigma_arr for key, sigma_arr in sigmas_test.items()}
-    sigma_vs_residual = False
-    if sigma_vs_residual:
-        plot_sigma_vs_residual(
-            sigma_vs_residual, abs_residuals_test,
-            title=f"Difficulty score vs. realized error on \"{dataset.name}\"",
-            save_path=os.path.join(task_folder, "sigma_vs_residual.png"),
-            colors={m: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m in sigma_vs_residual},
-            labels=translations)
+    # marginal difficulty-score distributions
+    plot_sigma_distributions(
+        sigmas_comp, f"Difficulty-score distributions on \"{dataset.name}\"",
+        os.path.join(task_folder, "sigma_distributions.png")
+        )
 
     return ci_means, ci_medians, coverages, r2
 
@@ -446,7 +394,6 @@ def run_all_tasks(config, random_seed):
             results_dictionary[f"{method}_median"].append(ci_medians[method])
             results_dictionary[f"{method}_coverage"].append(coverages[method])
 
-        # Plot target distribution
         plot_target_distribution(dataset.df_y.values, dataset.name, os.path.join(task_folder, "target_distribution.png"))
 
         df_results = pd.DataFrame.from_dict(results_dictionary)
@@ -454,17 +401,6 @@ def run_all_tasks(config, random_seed):
 
         #TODO: remove for all datasets
         break
-
-    # cross-dataset counterpart to each task's own pareto.png -- one point per
-    # (dataset, method) instead of one aggregate point per method
-    df_results = pd.DataFrame.from_dict(results_dictionary)
-    methods = sorted({k[:-len("_coverage")] for k in results_dictionary if k.endswith("_coverage")})
-    df_long = melt_results_for_cross_dataset_plot(df_results, methods)
-    if not df_long.empty:
-        plot_cross_dataset_pareto(
-            df_long,
-            title="Performance of conformal prediction methods across datasets",
-            save_path=os.path.join(results_folder, "cross_dataset_pareto.png"))
 
 
 if __name__ == "__main__":

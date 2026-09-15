@@ -36,13 +36,14 @@ def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confide
     together with the difficulty estimates on the calibration and test sets.
     """
     sigmas_cal = de.apply(X_cal)
+    sigmas_test = de.apply(X_test)
 
     regressor_norm = WrapRegressor(learner_prop)
     regressor_norm.calibrate(X_cal, y_cal, de=de)
 
     intervals = regressor_norm.predict_int(X_test, confidence=confidence)
 
-    return intervals, sigmas_cal
+    return intervals, sigmas_cal, sigmas_test
 
 def find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed):
     """

@@ -418,7 +418,8 @@ def _(
     de_var_oob = DifficultyEstimator()
     de_var_oob.fit(X=X_prop_train, learner=learner_prop, scaler=True, oob=True)
     sigmas_train["var"] = de_var_oob.apply()
-    sigmas_cal["var"] = de_var.apply(X_cal) # For cal and test, use default (no oob) version, otherwise same oob trees are used instead of full model
+    # cal/test use the non-oob fit's sigmas, same as sigmas["normalized_cp_norm_var"] above
+    sigmas_cal["var"] = de_var.apply(X_cal)
     sigmas_test["var"] = de_var.apply(X_test)
 
     # augment input using sigmas
@@ -872,7 +873,6 @@ def _(df_run_results, mo, np, pd, plt, sr_keys):
     from scipy.stats import pearsonr as _pearsonr
     from scipy.stats import zscore 
 
-    # does a better base regressor (higher R^2) lead to narrower intervals and/or better coverage?
     dict_corr = {}
     _corr_rows = []
     for _m in sr_keys:
@@ -978,8 +978,6 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(comparison_keys, confidence, df_run_results, mo, pd, plt, sr_keys):
-    # simple question: on average, how close is each method's realized test
-    # coverage to the 0.95 target, and how much does that vary dataset to dataset?
     _methods = comparison_keys + sr_keys
     _rows = []
     for _m in _methods:
