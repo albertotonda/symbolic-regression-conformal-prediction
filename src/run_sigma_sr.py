@@ -7,6 +7,7 @@ os.environ["PYSR_RECORDER_FILE"] = "history.jsonl"
 import argparse
 import numpy as np
 import pandas as pd
+import sympy
 
 from collections import defaultdict
 
@@ -40,6 +41,11 @@ from utils.plotting import (
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
 from utils.config import load_config, dump_config
+
+# Keys must match custom operator names in sr_params.unary_operators.
+SIGMA_SR_EXTRA_SYMPY_MAPPINGS = {
+    "logm": lambda x: sympy.log(sympy.Abs(x) + 1e-8),
+}
 
 # sigmas_train/cal/test are keyed by the short difficulty-estimator name
 # (set in the augmentation blocks below); conf_intervals/sigmas_comp are
@@ -246,6 +252,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
             binary_operators=config.sr_params.binary_operators,
             unary_operators=config.sr_params.unary_operators,
             nested_constraints=config.sr_params.nested_constraints,
+            extra_sympy_mappings=SIGMA_SR_EXTRA_SYMPY_MAPPINGS,
             verbosity=1, # can also be set to 0, it should be ok
             random_state=random_seed,
             output_directory=task_folder,

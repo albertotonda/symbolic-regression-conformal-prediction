@@ -27,11 +27,11 @@ sr_params:
     population_size: 30
     niterations: 10
     binary_operators: ["+", "-", "*", "/"]
-    unary_operators: ["log", "exp"]
+    unary_operators: ["logm(x) = log(abs(x) + 1f-8)", "exp"]
     nested_constraints: {
         # "sin": {"cos": 0, "sin": 0}, 
         # "cos": {"cos": 0, "sin": 0},
-        "log": {"log": 0},
+        "logm": {"logm": 0},
         "exp": {"exp": 0}
     }
     temp_equation_file: False
