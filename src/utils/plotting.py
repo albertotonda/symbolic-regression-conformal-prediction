@@ -175,8 +175,9 @@ def plot_binned_sigma_metric(binned_stats, metric, save_path, highlighted_keys=N
         # equation mode: only the highlighted (chosen) equation is labeled
         # method mode (no `complexity`): every series gets a legend entry
         if use_complexity:
-            handles.append(line if is_highlighted else None)
-            legend_labels.append("Chosen" if is_highlighted else None)
+            if is_highlighted:
+                handles.append(line)
+                legend_labels.append("Chosen")
         else:
             handles.append(line)
             legend_labels.append(key)
