@@ -270,11 +270,13 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
                                      n_bins=15, cmap="plasma"):
     """
     For every Hall-of-Fame equation, its test-set difficulty score plotted
-    against the base learner's absolute residual, both aggregated (median)
-    over `n_bins` equal-frequency bins of residual rank, since raw
-    per-point sigma is too noisy to compare across equations. All equations
-    share the same residual bins, so curves stay directly comparable
-    bin-for-bin.
+    against `n_bins` equal-frequency bins of residual rank (same point
+    count per bin, ordered by increasing absolute residual), since raw
+    per-point sigma is too noisy to compare across equations. The x-axis is
+    the bin index rather than each bin's residual value, so bins stay
+    evenly spaced regardless of how skewed the residual distribution is.
+    All equations share the same residual bins, so curves stay directly
+    comparable bin-for-bin.
 
     `df_hof` needs a `Chosen` column, a `sigmas` column (Python list of
     per-test-point sigma, one entry per row), and an index of
@@ -284,7 +286,7 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
     print("Plotting sigmas vs binned residuals")
     abs_res = np.asarray(abs_res)
     bins = np.array_split(np.argsort(abs_res), n_bins)
-    bin_res_medians = [np.median(abs_res[b]) for b in bins]
+    bin_indices = np.arange(len(bins))
 
     complexity = df_hof.index.values.astype(float)
     vmin, vmax = complexity.min(), complexity.max()
@@ -298,7 +300,7 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
         is_chosen = bool(row["Chosen"])
         bin_sigma_medians = [np.median(sigmas[b]) for b in bins]
         ax.plot(
-            bin_res_medians, bin_sigma_medians, marker="o", markersize=4,
+            bin_indices, bin_sigma_medians, marker="o", markersize=4,
             color=sm.to_rgba(row_complexity),
             alpha=1.0 if is_chosen else 0.6,
             linewidth=3 if is_chosen else 1,
@@ -307,8 +309,8 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
 
     fig.colorbar(sm, ax=ax, label="Complexity")
 
-    ax.set_xlabel("Absolute residuals (binned, median per bin)")
-    ax.set_yscale("log")
+    ax.set_xlabel("Absolute residual bin (equal count per bin, increasing order)")
+    ax.set_xticks(bin_indices)
     ax.set_ylabel("Equation's predicted sigma on test set (median per bin)")
     ax.set_title(f"Sigma test by equation ({loss_name}) on \"{dataset_name}\"")
     if chosen_mask.any():
