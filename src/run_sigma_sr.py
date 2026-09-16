@@ -251,7 +251,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
                 return np.exp(np.clip(log_sigma, -50.0, 50.0))
 
             de = DifficultyEstimator()
-            de.fit(X_train_sr, f=sigma_f)
+            de.fit(X_train_sr, f=sigma_f, scaler=True)
             sigmas_cal_sr = de.apply(X_cal_sr)
             sigmas_test_sr = de.apply(X_test_sr)
 
