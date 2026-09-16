@@ -63,6 +63,7 @@ def plot_confidence_intervals(method, y_test, y_test_pred, confidence_intervals,
     intervals, for a handful of test samples sorted by increasing target
     value, and save the figure to save_path.
     """
+    print(f"Plotting confidence intervals for {method}")
     y = y_test[:20]
     y_pred = y_test_pred[:20]
     y_pred_ci = confidence_intervals[:20]
@@ -99,6 +100,7 @@ def plot_pareto(methods, medians, coverages, title, save_path, translations=tran
     directly from the medians/coverages dicts (one scalar per method), and
     save the figure to save_path.
     """
+    print("Plotting pareto for method comparison")
     labels = [translations.get(m, m) if translations is not None else m for m in methods]
     palette = {label: METHOD_COLORS.get(m, _FALLBACK_COLOR) for m, label in zip(methods, labels)}
 
@@ -148,6 +150,7 @@ def plot_binned_sigma_metric(binned_stats, metric, save_path, highlighted_keys=N
 
     `binned_stats` is {key: DataFrame} (needs `bin` and `metric` columns).
     """
+    print(f"Plotting {metric.replace("_", " ")} vs binned sigmas for {"equations" if use_complexity else "methods"} comparison")
     highlighted_keys = highlighted_keys or []
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
@@ -190,7 +193,7 @@ def plot_binned_sigma_metric(binned_stats, metric, save_path, highlighted_keys=N
               bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize='small', framealpha=0.85)
     if sm is not None:
         fig.colorbar(sm, ax=ax, label="Complexity")
-    ax.set_title(f"{metric.title()} vs binned difficulty scores")
+    ax.set_title(f"{metric.replace("_", " ").title()} vs binned difficulty scores")
 
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -203,20 +206,19 @@ def plot_sigma_distributions(sigmas_by_key, title, save_path):
     
     `sigmas_by_key` : dict(key: sigmas)
     """
+    print("Plotting sigmas distributions")
     rows = []
     for key, sigmas in sigmas_by_key.items():
         sigmas = pd.Series(sigmas, dtype=float)
-        # normalized = sigmas / sigmas.median()
-        normalized = sigmas
-        rows.extend({"key": key, "normalized_sigma": v} for v in normalized)
+        rows.extend({"key": key, "sigma": v} for v in sigmas)
     df = pd.DataFrame(rows)
 
     fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(_METHOD_ORDER)), 6))
-    sns.violinplot(data=df, x="key", y="normalized_sigma", hue="key", order=_METHOD_ORDER,
+    sns.violinplot(data=df, x="key", y="sigma", hue="key", order=_METHOD_ORDER,
                    hue_order=_METHOD_ORDER, palette=_CATEGORICAL_PALETTE, legend=False, ax=ax, cut=0)
     ax.set_yscale("log")
     ax.set_xlabel(None)
-    ax.set_ylabel("Difficulty score (normalized by own median)")
+    ax.set_ylabel("Difficulty score")
     ax.set_title(title)
     plt.setp(ax.get_xticklabels(), rotation=20, ha='right')
 
@@ -232,6 +234,7 @@ def plot_equation_performance_vs_complexity(df_hof, loss_name, dataset_name, sav
     `df_hof` needs `coverage`, `ci_mean`, `ci_median`, `Chosen` columns and
     an index of equation complexity.
     """
+    print("Plotting equation performance vs complexity")
     complexity = df_hof.index.values.astype(float)
     vmin, vmax = complexity.min(), complexity.max()
     chosen_mask = df_hof["Chosen"].values.astype(bool)
@@ -264,22 +267,24 @@ def plot_equation_performance_vs_complexity(df_hof, loss_name, dataset_name, sav
 
 
 def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
-                                     n_points=50, cmap="plasma"):
+                                     n_bins=15, cmap="plasma"):
     """
-    For every Hall-of-Fame equation, its calibration-set difficulty score 
-    plotted against the base learner's absolute residual at the same calibration points.
-    Points are subsampled once, to `n_points` calibration points evenly
-    spaced by absolute residual rank, and that same x-subsample is reused 
-    for every equation's sigma curve so all curves stay directly comparable point-for-point.
+    For every Hall-of-Fame equation, its test-set difficulty score plotted
+    against the base learner's absolute residual, both aggregated (median)
+    over `n_bins` equal-frequency bins of residual rank, since raw
+    per-point sigma is too noisy to compare across equations. All equations
+    share the same residual bins, so curves stay directly comparable
+    bin-for-bin.
 
     `df_hof` needs a `Chosen` column, a `sigmas` column (Python list of
     per-test-point sigma, one entry per row), and an index of
-    equation complexity. `abs_res_cal` is the base learner's absolute residual
+    equation complexity. `abs_res` is the base learner's absolute residual
     on the test set, same length and ordering as each row's `sigmas`.
     """
+    print("Plotting sigmas vs binned residuals")
     abs_res = np.asarray(abs_res)
-    sorted_indices = np.argsort(abs_res)
-    subsample = sorted_indices[np.linspace(0, len(abs_res), endpoint=False, num=n_points, dtype=int)]
+    bins = np.array_split(np.argsort(abs_res), n_bins)
+    bin_res_medians = [np.median(abs_res[b]) for b in bins]
 
     complexity = df_hof.index.values.astype(float)
     vmin, vmax = complexity.min(), complexity.max()
@@ -291,8 +296,9 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
     for row_complexity, row in df_hof.iterrows():
         sigmas = np.asarray(row["sigmas"])
         is_chosen = bool(row["Chosen"])
+        bin_sigma_medians = [np.median(sigmas[b]) for b in bins]
         ax.plot(
-            abs_res[subsample], sigmas[subsample],
+            bin_res_medians, bin_sigma_medians, marker="o", markersize=4,
             color=sm.to_rgba(row_complexity),
             alpha=1.0 if is_chosen else 0.6,
             linewidth=3 if is_chosen else 1,
@@ -301,9 +307,9 @@ def plot_sigma_vs_residuals(df_hof, abs_res, loss_name, dataset_name, save_path,
 
     fig.colorbar(sm, ax=ax, label="Complexity")
 
-    ax.set_xlabel("Absolute residuals")
+    ax.set_xlabel("Absolute residuals (binned, median per bin)")
     ax.set_yscale("log")
-    ax.set_ylabel("Equation's predicted sigma on test set")
+    ax.set_ylabel("Equation's predicted sigma on test set (median per bin)")
     ax.set_title(f"Sigma test by equation ({loss_name}) on \"{dataset_name}\"")
     if chosen_mask.any():
         ax.legend(loc='best', fontsize='small')
@@ -318,6 +324,7 @@ def plot_pareto_fronts(fronts, path, title="Pareto fronts (final population)"):
     `recompute_pareto_fronts_from_population` for a single output (each needs
     `complexity` and `loss` columns).
     """
+    print("Plotting final evolution pareto fronts")
     fig, ax = plt.subplots(figsize=(6, 4.5), dpi=150)
     fig.patch.set_facecolor("#fcfcfb")
     ax.set_facecolor("#fcfcfb")
