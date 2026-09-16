@@ -247,6 +247,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
                 # node can overflow once exponentiated here, so clip in
                 # log-space first.
                 log_sigma = sigma_predictor.equations_["lambda_format"][idx](X)
+                log_sigma = np.nan_to_num(log_sigma, nan=50.0)
                 return np.exp(np.clip(log_sigma, -50.0, 50.0))
 
             de = DifficultyEstimator()
