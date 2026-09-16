@@ -215,7 +215,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
     for loss_name in config.loss_functions:
         loss_kwargs, y_train_sr = sigma_losses[loss_name]
         sigma_predictor = PySRRegressor(
-            model_selection="score",
+            model_selection="accuracy", # more complex equation means more expressivity of sigma
             tournament_selection_n=15,
             populations=config.sr_params.npopulations, # default 31
             population_size=config.sr_params.population_size, # must be >= topn:=12 (default 27)
@@ -386,6 +386,8 @@ def run_all_tasks(config, random_seed):
     dump_config(config, results_folder)
 
     for dataset in iter_datasets(config):
+        if dataset.name != "abalone":
+            continue
         print(dataset)
 
         task_folder = os.path.join(results_folder, dataset.name)
