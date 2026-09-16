@@ -386,6 +386,8 @@ def run_all_tasks(config, random_seed):
     dump_config(config, results_folder)
 
     for dataset in iter_datasets(config):
+
+        # TODO: Remove for all datasets
         if dataset.name != "abalone":
             continue
         print(dataset)
@@ -408,9 +410,6 @@ def run_all_tasks(config, random_seed):
 
         df_results = pd.DataFrame.from_dict(results_dictionary)
         df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
-
-        #TODO: remove for all datasets
-        break
 
 
 if __name__ == "__main__":
