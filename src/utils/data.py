@@ -70,7 +70,11 @@ def load_and_preprocess_openml_task(task_id) :
     X = X_raw.loc[y_raw.notna()]
     y = y_raw.dropna()
 
+    cols = X.select_dtypes(exclude=["number"]).columns
     for i, c in enumerate(X.columns):
+        if (c in cols) and (not categorical[i]) and (X[c].nunique() < X.shape[0] // 4): # heuristic to detect categories
+            X[c] = X[c].astype("category")
+            categorical[i] = True
         if categorical[i]:
             X[c] = X[c].cat.codes
 
