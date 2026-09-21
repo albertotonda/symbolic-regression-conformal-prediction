@@ -39,7 +39,7 @@ from pysr import PySRRegressor
 
 import openml
 
-from utils.utils import log_equations, setup_results_folder, fit_with_early_stopping
+from utils.utils import log_equations, setup_results_folder, fit_with_early_stopping, redirect_output_to_file
 from utils.config import load_config, dump_config
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
@@ -215,7 +215,12 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
         verbosity=1,
         random_state=random_seed,
         deterministic=True,
-        parallelism="serial"
+        parallelism="serial",
+        # tmux panes report as a tty even when unattended, so PySR's default
+        # auto-detection would watch stdin for its 'q'+Enter early-stop
+        # command and block on it -- disable that explicitly for
+        # unattended/headless runs.
+        input_stream="devnull",
         )
 
     print("Running symbolic regression...")
@@ -360,6 +365,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
 def run_all_tasks(config, random_seed):
 
     results_folder = setup_results_folder("interval-sr", random_seed)
+    redirect_output_to_file(os.path.join(results_folder, "run.log"))
     results_dictionary = defaultdict(list, {"task_id": [], "dataset_name": [], "r2": []})
 
     # Save config for tracing

@@ -25,7 +25,7 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from utils.utils import setup_results_folder, fit_with_early_stopping, read_tensorboard_scalar
+from utils.utils import setup_results_folder, fit_with_early_stopping, read_tensorboard_scalar, redirect_output_to_file
 from utils.plotting import plot_loss_curve
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
@@ -365,6 +365,7 @@ def iter_datasets(config):
 def run_all_tasks(config, random_seed):
 
     results_folder = setup_results_folder("sigma-sr", random_seed)
+    redirect_output_to_file(os.path.join(results_folder, "run.log"))
     results_dictionary = defaultdict(list, {"task_id": [], "dataset_name": [], "r2": []})
 
     # Save config for tracing

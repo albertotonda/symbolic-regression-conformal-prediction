@@ -5,9 +5,30 @@ Extra functions
 
 import math
 import os
+import sys
 from datetime import datetime
 
 import numpy as np
+
+
+def redirect_output_to_file(log_path):
+    """
+    Redirect this process's stdout and stderr to `log_path` (appending),
+    instead of the terminal. Redirects at the OS file-descriptor level
+    (not just sys.stdout/sys.stderr), since PySR's embedded Julia backend
+    writes its own progress/precompilation output straight to the process's
+    file descriptors rather than through Python's io layer -- reassigning
+    sys.stdout alone would miss it.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    log_file = open(log_path, "a", buffering=1)
+    os.dup2(log_file.fileno(), sys.stdout.fileno())
+    os.dup2(log_file.fileno(), sys.stderr.fileno())
+    sys.stdout = log_file
+    sys.stderr = log_file
+
 
 def setup_results_folder(prefix, random_seed):
     """
