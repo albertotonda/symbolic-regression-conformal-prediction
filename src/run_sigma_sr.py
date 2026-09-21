@@ -27,7 +27,7 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from utils.utils import setup_results_folder
+from utils.utils import setup_results_folder, fit_with_early_stopping
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
@@ -227,7 +227,15 @@ def run_single_task(dataset, task_folder, config, random_seed):
             **loss_kwargs,
         )
 
-        sigma_predictor.fit(X_train_sr, y_train_sr)
+        if config.sr_params.early_stop:
+            fit_with_early_stopping(
+                sigma_predictor, X_train_sr, y_train_sr,
+                chunk_size=config.sr_params.early_stop_chunk_size,
+                patience=config.sr_params.early_stop_patience,
+                min_relative_improvement=config.sr_params.early_stop_min_improvement,
+            )
+        else:
+            sigma_predictor.fit(X_train_sr, y_train_sr)
 
         # Hall of Fame equations
         df_hof = pd.read_csv(sigma_predictor.get_equation_file())

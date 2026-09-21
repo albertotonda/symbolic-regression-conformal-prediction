@@ -25,7 +25,11 @@ ncp_knn_k: 25
 sr_params:
     npopulations: 40
     population_size: 50
-    niterations: 10
+    niterations: 1000
+    early_stop: True # set to False to run the full niterations (regular evolution, no plateau check)
+    early_stop_chunk_size: 2
+    early_stop_patience: 3
+    early_stop_min_improvement: 1.0e-3
     binary_operators: ["+", "-", "*", "/"]
     unary_operators: ["logm(x) = log(abs(x) + 1f-8)", "exp"]
     nested_constraints: {
@@ -38,7 +42,8 @@ sr_params:
 
 extra_regressors:
     random_forest: 
-        activate: True
+        activate: False
         n_estimators: 500
-    extra_regressor2:
-        param: []
+    extra_trees:
+        activate: False
+        n_estimators: 500
