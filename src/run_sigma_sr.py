@@ -270,94 +270,74 @@ def run_single_task(dataset, task_folder, config, random_seed):
                 conf_intervals[f"sr_{loss_name}"] = ci_intervals
                 sigmas_comp[f"sr_{loss_name}"] = sigmas_test_sr
 
-            ci_mean, ci_median, coverage = compute_ci_stats(ci_intervals, y_test)
-            row_label = df_hof.index[idx]
-            df_hof.loc[row_label, "ci_median"] = ci_median
-            df_hof.loc[row_label, "ci_mean"] = ci_mean
-            df_hof.loc[row_label, "coverage"] = coverage
-            df_hof.at[row_label, "sigmas"] = list(sigmas_test_sr)
-            equation_binned_stats[row_label] = compute_binned_ci_stats(
-                sigmas_test_sr, ci_intervals, y_test, min_points, random_seed)
+            ci_mean, ci_median, coverage = compute_ci_stats(conf_intervals_hof[complexity], y_test)
+            df_hof.loc[complexity, "ci_median"] = ci_median
+            df_hof.loc[complexity, "ci_mean"] = ci_mean
+            df_hof.loc[complexity, "coverage"] = coverage
 
-        df_hof.to_csv(sigma_predictor.get_equation_file())
+        df_sigma_cal_hof = pd.DataFrame.from_dict(sigmas_cal_hof)
+        df_sigma_test_hof = pd.DataFrame.from_dict(sigmas_test_hof)
+        df_intervals_hof = pd.concat({complexity: pd.DataFrame(arr) for complexity, arr in conf_intervals_hof.items()}, axis=0)
+        df_sigma_cal_hof.to_csv(os.path.join(task_folder, f"hof_sigmas_cal_{loss_name}.csv"), index_label="index")
+        df_sigma_test_hof.to_csv(os.path.join(task_folder, f"hof_sigmas_test_{loss_name}.csv"), index_label="index")
+        df_intervals_hof.to_csv(os.path.join(task_folder, f"hof_intervals_{loss_name}.csv"), header=["lower_bound", "upper_bound"], index_label=["complexity", "index"])
+        df_hof.to_csv(os.path.join(task_folder, f"hof_{loss_name}.csv"))
 
-        # Total equations at the end of the evolution (different from HOF!)
-        df_equations = extract_all_equations(sigma_predictor)
-        df_equations.to_csv(os.path.join(task_folder, "checkpoints", "equations_all.csv"))
-        fronts = compute_pareto_fronts(df_equations, n_fronts=3)
-        plot_pareto_fronts(fronts, os.path.join(task_folder, "pareto_fronts.png"))
 
-        # complexity vs. coverage/width across every Hall-of-Fame equation for this loss
-        plot_equation_performance_vs_complexity(
-            df_hof, loss_name, dataset.name,
-            os.path.join(task_folder, f"equation_performance_{loss_name}.png"))
+    for regressor_name in config.extra_regressors.keys():
+        if not config.extra_regressors[regressor_name].activate:
+            continue
 
-        # sigma-binned coverage/width across every Hall-of-Fame equation for this loss
-        chosen = [k for k in df_hof.index if df_hof.loc[k]["Chosen"]]
-        plot_binned_sigma_metric(
-            binned_stats=equation_binned_stats,
-            metric="coverage",
-            save_path=os.path.join(task_folder, f"equation_binned_sigma_coverage_{loss_name}.png"),
-            highlighted_keys=chosen,
-            use_complexity=True
-            )
-        plot_binned_sigma_metric(
-            binned_stats=equation_binned_stats,
-            metric="median_width",
-            save_path=os.path.join(task_folder, f"equation_binned_sigma_median_width_{loss_name}.png"),
-            highlighted_keys=chosen,
-            use_complexity=True
-            )
+        match regressor_name:
+            case "random_forest":
+                print("Training random forest regressor for sigma...")
+                regressor = WrapRegressor(
+                    RandomForestRegressor(n_estimators=config.extra_regressors.random_forest.n_estimators, random_state=random_seed)
+                )
+            case "extra_trees":
+                print("Training extra trees regressor for sigma...")
+                regressor = WrapRegressor(
+                    ExtraTreesRegressor(n_estimators=config.extra_regressors.extra_trees.n_estimators, random_state=random_seed)
+                )
+            case _:
+                print(f"Regressor {regressor_name} not implemented, skipping...")
+                continue
 
-        # per-equation sigmas vs. base learner's absolute residuals,
-        # across every Hall-of-Fame equation for this loss
-        plot_sigma_vs_residuals(
-            df_hof, abs_res_test, loss_name, dataset.name,
-            os.path.join(task_folder, f"sigmas_vs_residuals_{loss_name}.png"))
+        regressor.fit(X_train_sr, np.abs(residuals_prop_oob))
 
-    ci_means = {}
-    ci_medians = {}
-    coverages = {}
+        y_cal_pred = base_regressor.predict(X_cal_sr)
+        y_test_pred = base_regressor.predict(X_test_sr)
 
-    # per-method coverage/amplitude stats + CI plot
-    for method, intervals in conf_intervals.items():
-        ci_means[method], ci_medians[method], coverages[method] = compute_ci_stats(intervals, y_test)
-        plot_confidence_intervals(
-            method, y_test, y_test_pred, intervals, dataset.name,
-            coverages[method], ci_medians[method],
-            os.path.join(task_folder, method + ".png"))
+        de = DifficultyEstimator()
+        de.fit(X_train_sr, f=lambda X: regressor.predict(X), scaler=True)
+        conf_intervals[regressor_name], sigmas_cal[regressor_name], sigmas_test[regressor_name] = compute_normalized_intervals(
+            de=de,
+            learner_prop=learner_prop, 
+            X_cal=X_cal_sr, 
+            y_cal=y_cal, 
+            X_test=X_test_sr, 
+            confidence=config.confidence)
 
-    # per-task Pareto plot across all methods computed for this task
-    plot_pareto(
-        list(conf_intervals.keys()), ci_medians, coverages,
-        title=f"Performance of conformal prediction methods on dataset \"{dataset.name}\"",
-        save_path=os.path.join(task_folder, "pareto.png"))
+            
+    # Save everything to csv
+    df_sigmas_cal_per_method = pd.DataFrame.from_dict(sigmas_cal)
+    df_sigmas_test_per_method = pd.DataFrame.from_dict(sigmas_test)
+    df_intervals = pd.concat({method: pd.DataFrame(arr) for method, arr in conf_intervals.items()}, axis=0)
+    df_sigmas_cal_per_method.to_csv(os.path.join(task_folder, "methods_sigmas_cal.csv"), index_label="index")
+    df_sigmas_test_per_method.to_csv(os.path.join(task_folder, "methods_sigmas_test.csv"), index_label="index")
+    df_intervals.to_csv(os.path.join(task_folder, "methods_intervals.csv"), header=["lower_bound", "upper_bound"],  index_label=["method", "index"])
 
-    # size-stratified coverage/width, for methods with a real fitted difficulty
-    # estimator (sigmas_test_comp is keyed by difficulty-estimator name,
-    # mapped to its CP method via SIGMA_TEST_KEY_TO_METHOD)
-    binned_stats = {}
-    for method, sigma_arr in sigmas_comp.items():
-        if method in conf_intervals:
-            binned_stats[method] = compute_binned_ci_stats(
-                sigma_arr, conf_intervals[method], y_test, min_points, random_seed)
-    if binned_stats:
-        plot_binned_sigma_metric(
-            binned_stats=binned_stats,
-            metric="coverage",
-            save_path=os.path.join(task_folder, "method_binned_sigma_coverage.png"),
-            )
-        plot_binned_sigma_metric(
-            binned_stats=binned_stats,
-            metric="median_width",
-            save_path=os.path.join(task_folder, "method_binned_sigma_median_width.png"),
-            )
+    df_calibration = pd.DataFrame.from_dict(calibration_data)
+    df_testing = pd.DataFrame.from_dict(testing_data)
+    df_calibration.to_csv(os.path.join(task_folder, "calibration_data.csv"), index_label="index")
+    df_testing.to_csv(os.path.join(task_folder, "testing_data.csv"), index_label="index")
 
-    # marginal difficulty-score distributions
-    plot_sigma_distributions(
-        sigmas_comp, f"Difficulty-score distributions on \"{dataset.name}\"",
-        os.path.join(task_folder, "sigma_distributions.png")
-        )
+    ci_means, ci_medians, coverages = {}, {}, {}
+    for method in conf_intervals.keys():
+        ci_mean, ci_median, coverage = compute_ci_stats(conf_intervals[method], y_test)
+        ci_medians[method] = ci_median
+        ci_means[method] = ci_mean
+        coverages[method] = coverage
 
     return ci_means, ci_medians, coverages, r2
 
