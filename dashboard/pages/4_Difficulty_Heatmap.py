@@ -45,9 +45,13 @@ all_methods = sorted({m for df in per_point_by_dataset.values() for m in data.pe
 
 col1, col2 = st.columns(2)
 with col1:
-    method = st.selectbox("Method", options=all_methods, format_func=data.method_label)
+    method = st.selectbox(
+        "Method", options=all_methods, format_func=data.method_label, key="heatmap_method",
+    )
 with col2:
-    metric = st.selectbox("Metric", options=["Coverage", "Median width"])
+    metric = st.selectbox(
+        "Metric", options=["Coverage", "Median width"], key="heatmap_metric",
+    )
 
 sigma_col = f"sigma_{method}"
 value_col = f"covered_{method}" if metric == "Coverage" else f"width_{method}"

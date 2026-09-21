@@ -40,6 +40,7 @@ with col1:
     methods = st.multiselect(
         "Methods", options=all_methods, default=all_methods,
         format_func=data.method_label,
+        key="pareto_methods",
     )
 with col2:
     st.metric("Target coverage", f"{target_coverage:.2f}")
@@ -80,7 +81,9 @@ def _add_target_line(fig, row=None, col=None):
 tab_grid, tab_detail = st.tabs(["Grid (all datasets)", "Single dataset (detail)"])
 
 with tab_grid:
-    datasets = st.multiselect("Datasets", options=all_datasets, default=all_datasets)
+    datasets = st.multiselect(
+        "Datasets", options=all_datasets, default=all_datasets, key="pareto_grid_datasets",
+    )
     if not datasets:
         st.warning("Select at least one dataset.")
     else:
@@ -103,7 +106,7 @@ with tab_grid:
         st.plotly_chart(fig, width="content")
 
 with tab_detail:
-    dataset = st.selectbox("Dataset", options=all_datasets)
+    dataset = st.selectbox("Dataset", options=all_datasets, key="pareto_detail_dataset")
     row_data = df[df["dataset_name"] == dataset].iloc[0]
     fig = go.Figure()
     _add_method_traces(fig, row_data, methods, set(), marker_size=16)

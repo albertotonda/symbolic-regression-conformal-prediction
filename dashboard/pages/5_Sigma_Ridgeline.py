@@ -56,7 +56,7 @@ if not datasets_with_data:
     )
     st.stop()
 
-dataset = st.selectbox("Dataset", options=datasets_with_data)
+dataset = st.selectbox("Dataset", options=datasets_with_data, key="ridgeline_dataset")
 df = data.load_per_point(run_path, dataset)
 methods_all = data.per_point_methods(df)
 
@@ -78,6 +78,7 @@ if constant_methods:
 methods = st.multiselect(
     "Methods", options=all_methods, default=all_methods,
     format_func=data.method_label,
+    key="ridgeline_methods",
 )
 if not methods:
     st.warning("Select at least one method.")

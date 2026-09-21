@@ -45,7 +45,7 @@ if not datasets_with_data:
     )
     st.stop()
 
-dataset = st.selectbox("Dataset", options=datasets_with_data)
+dataset = st.selectbox("Dataset", options=datasets_with_data, key="sigma_vs_residuals_dataset")
 
 df = data.load_per_point(run_path, dataset)
 all_methods = data.per_point_methods(df)
@@ -53,6 +53,7 @@ all_methods = data.per_point_methods(df)
 methods = st.multiselect(
     "Methods", options=all_methods, default=all_methods,
     format_func=data.method_label,
+    key="sigma_vs_residuals_methods",
 )
 
 if not methods:
