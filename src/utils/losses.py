@@ -59,7 +59,6 @@ def bin_crossfit_loss_julia(confidence, lambda_cov):
         target_coverage = L(%.2f)
         alpha = one(L) - target_coverage
         n_bins = 4
-        lambda_cov = L(1.0)
 
         delta = abs.(dataset.y) ./ sigma
 

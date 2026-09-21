@@ -18,5 +18,9 @@ sr_params:
     tournament_selection_n: 1
     population_size: 12
     niterations: 2
+    early_stop: True # set to False to run the full niterations (regular evolution, no plateau check)
+    early_stop_chunk_size: 1
+    early_stop_patience: 3
+    early_stop_min_improvement: 1.0e-3
     binary_operators: ["+", "-", "*", "/"]
     unary_operators: ["sin", "cos", "log", "exp"]

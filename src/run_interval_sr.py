@@ -39,7 +39,7 @@ from pysr import PySRRegressor
 
 import openml
 
-from utils.utils import log_equations, setup_results_folder
+from utils.utils import log_equations, setup_results_folder, fit_with_early_stopping
 from utils.config import load_config, dump_config
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
@@ -219,7 +219,15 @@ def run_symbolic_regression(X_cal, X_test, y_cal, y_test, y_cal_pred, y_test_pre
         )
 
     print("Running symbolic regression...")
-    ci_regressor.fit(X_train_sr, y_train_sr)
+    if config.sr_params.early_stop:
+        fit_with_early_stopping(
+            ci_regressor, X_train_sr, y_train_sr,
+            chunk_size=config.sr_params.early_stop_chunk_size,
+            patience=config.sr_params.early_stop_patience,
+            min_relative_improvement=config.sr_params.early_stop_min_improvement,
+        )
+    else:
+        ci_regressor.fit(X_train_sr, y_train_sr)
     log_equations(ci_regressor, task_folder, "symbolic_regression_cp")
 
     print("Now computing confidence intervals for conformal set...")
