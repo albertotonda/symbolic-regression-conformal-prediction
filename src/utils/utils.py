@@ -80,3 +80,21 @@ def fit_with_early_stopping(sr_model, X, y, chunk_size=1, patience=3, min_relati
 
     sr_model.niterations = total_iterations
     return sr_model
+
+
+def read_tensorboard_scalar(log_dir, tag):
+    """
+    Read back one scalar time series logged during a PySRRegressor fit via
+    `logger_spec=TensorBoardLoggerSpec(log_dir=log_dir, ...)`.
+
+    Returns (steps, values) as parallel lists. `tag="search/data/summaries/min_loss"`
+    is the best loss on the Pareto front, logged throughout the search itself
+    (single continuous Julia run, no Python-level restarts).
+    """
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+    accumulator = EventAccumulator(log_dir)
+    accumulator.Reload()
+    events = accumulator.Scalars(tag)
+
+    return [e.step for e in events], [e.value for e in events]

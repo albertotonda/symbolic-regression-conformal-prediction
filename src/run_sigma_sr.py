@@ -1,9 +1,6 @@
 import os
 import sys
 
-os.environ["PYSR_RECORDER"] = "true"
-os.environ["PYSR_RECORDER_FILE"] = "history.jsonl"
-
 import argparse
 import numpy as np
 import pandas as pd
@@ -20,6 +17,7 @@ from sklearn.metrics import r2_score
 from pysr import PySRRegressor
 from pysr.julia_import import SymbolicRegression, jl
 from pysr.julia_helpers import jl_array
+from pysr.logger_specs import TensorBoardLoggerSpec
 
 import openml
 
@@ -27,7 +25,8 @@ src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from utils.utils import setup_results_folder, fit_with_early_stopping
+from utils.utils import setup_results_folder, fit_with_early_stopping, read_tensorboard_scalar
+from utils.plotting import plot_loss_curve
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
@@ -209,6 +208,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
     for loss_name in config.loss_functions:
         loss_kwargs, y_train_sr = sigma_losses[loss_name]
+        tb_log_dir = os.path.join(task_folder, "tb_logs", loss_name)
         sigma_predictor = PySRRegressor(
             model_selection="accuracy", # more complex equation means more expressivity of sigma
             tournament_selection_n=15,
@@ -224,6 +224,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
             output_directory=task_folder,
             run_id="checkpoints",
             tempdir=task_folder,
+            logger_spec=TensorBoardLoggerSpec(log_dir=tb_log_dir, log_interval=1, overwrite=True),
             **loss_kwargs,
         )
 
@@ -236,6 +237,9 @@ def run_single_task(dataset, task_folder, config, random_seed):
             )
         else:
             sigma_predictor.fit(X_train_sr, y_train_sr)
+
+        steps, losses = read_tensorboard_scalar(tb_log_dir, "search/data/summaries/min_loss")
+        plot_loss_curve(steps, losses, loss_name, os.path.join(task_folder, f"loss_curve_{loss_name}.png"))
 
         # Hall of Fame equations
         df_hof = pd.read_csv(sigma_predictor.get_equation_file())

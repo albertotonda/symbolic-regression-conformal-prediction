@@ -13,4 +13,5 @@ scikit_learn==1.9.0
 scipy==1.18.1
 seaborn==0.13.2
 sympy==1.14.0
+tensorboard==2.21.0
 xgboost==3.4.1

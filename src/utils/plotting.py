@@ -142,6 +142,22 @@ def plot_target_distribution(y_values, dataset_name, save_path):
     plt.close(fig)
 
 
+def plot_loss_curve(steps, losses, label, save_path):
+    """
+    Best loss on the Pareto front over the course of one PySR search
+    (logged throughout the run via TensorBoardLoggerSpec), log-scale since SR
+    losses commonly span orders of magnitude as the search converges.
+    """
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.plot(steps, losses, color=_CATEGORICAL_PALETTE[0], linewidth=2)
+    ax.set_yscale('log')
+    ax.set_xlabel('Search step')
+    ax.set_ylabel('Best loss (Pareto front)')
+    ax.set_title(f"{label}: loss vs. search step")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
 def plot_binned_sigma_metric(binned_stats, metric, save_path, highlighted_keys=None,
                             use_complexity=False, cmap="plasma"):
     """
