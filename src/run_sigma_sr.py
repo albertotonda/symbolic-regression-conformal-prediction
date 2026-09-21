@@ -11,10 +11,10 @@ import sympy
 
 from collections import defaultdict
 
-from crepes import WrapRegressor, ConformalRegressor
+from crepes import WrapRegressor
 from crepes.extras import DifficultyEstimator, binning
 
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.metrics import r2_score
 
 from pysr import PySRRegressor
@@ -29,12 +29,7 @@ if src_path not in sys.path:
 
 from utils.utils import setup_results_folder
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
-from utils.evaluate import compute_ci_stats, compute_binned_ci_stats
-from utils.plotting import (
-    plot_confidence_intervals, plot_pareto, plot_target_distribution, plot_pareto_fronts,
-    plot_binned_sigma_metric, plot_sigma_distributions,
-    plot_equation_performance_vs_complexity, plot_sigma_vs_residuals,
-)
+from utils.evaluate import compute_ci_stats
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
 from utils.losses import bin_crossfit_loss_julia
 from utils.config import load_config, dump_config
@@ -105,6 +100,12 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
     X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test = split_and_normalize_data(dataset.df_X, dataset.df_y, random_seed)
 
+    # Store y_cal, y_test, y_cal_pred, y_test_pred, residuals_cal, residuals_pred for saving
+    calibration_data = {}
+    testing_data = {}
+    calibration_data["y"] = y_cal
+    testing_data["y"] = y_test
+
     # crepes.WrapRegressor wraps any sklearn-compatible regressor and adds
     # conformal prediction methods (.calibrate() and .predict_int()).
     print("Training base regressor...")
@@ -116,19 +117,22 @@ def run_single_task(dataset, task_folder, config, random_seed):
     y_cal_pred = base_regressor.predict(X_cal)
     y_test_pred = base_regressor.predict(X_test)
 
+    calibration_data["y_pred"] = y_cal_pred
+    testing_data["y_pred"] = y_test_pred
+    calibration_data["residuals"] = y_cal - y_cal_pred
+    testing_data["residuals"] = y_test - y_test_pred
+
     r2 = r2_score(y_test, y_test_pred)
     print(f'R² on test set: {r2:.4f}')
 
     learner_prop = base_regressor.learner
-    sigmas_train_oob = {}
-    sigmas_cal_oob = {}
-    sigmas_test_oob = {}
-    sigmas_comp = {} # sigmas on test set for comparison
-    conf_intervals = {}
+    sigmas_train_oob = {} # For data augmentation
+    sigmas_cal, sigmas_test, conf_intervals = {}, {}, {}
 
     # Standard CP
     base_regressor.calibrate(X_cal, y_cal)
-    sigmas_comp["standard_cp"] = np.ones(len(X_test))
+    sigmas_cal["standard_cp"] = np.ones(len(X_cal))
+    sigmas_test["standard_cp"] = np.ones(len(X_test))
     conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=config.confidence)
 
     # KNN distance
@@ -136,45 +140,37 @@ def run_single_task(dataset, task_folder, config, random_seed):
     # single fit serves both compute_normalized_intervals and augmentation.
     augment_knn_dist = config.data_augmentation.sigma_knn_dist
     de_knn_dist = fit_difficulty_estimator(X_prop_train, "knn_dist", oob=augment_knn_dist)
-    conf_intervals["knn_dist"], sigma_cal_knn, sigmas_comp["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, config.confidence)
+    conf_intervals["knn_dist"], sigmas_cal["knn_dist"], sigmas_test["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_dist:
         sigmas_train_oob["knn_dist"] = de_knn_dist.apply()
-        sigmas_cal_oob["knn_dist"] = sigma_cal_knn
-        sigmas_test_oob["knn_dist"] = sigmas_comp["knn_dist"]
 
     # KNN std
     augment_knn_std = config.data_augmentation.sigma_knn_std
     de_knn_std = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train, oob=augment_knn_std)
-    conf_intervals["knn_std"], sigma_cal_std, sigmas_comp["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, config.confidence)
+    conf_intervals["knn_std"], sigmas_cal["knn_std"], sigmas_test["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_std:
         sigmas_train_oob["knn_std"] = de_knn_std.apply()
-        sigmas_cal_oob["knn_std"] = sigma_cal_std
-        sigmas_test_oob["knn_std"] = sigmas_comp["knn_std"]
 
     # KNN out-of-bag residuals
     augment_knn_res = config.data_augmentation.sigma_knn_res
     de_knn_res = fit_difficulty_estimator(X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop, oob=augment_knn_res)
-    conf_intervals["knn_res"], sigma_cal_res, sigmas_comp["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence)
+    conf_intervals["knn_res"], sigmas_cal["knn_res"], sigmas_test["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if augment_knn_res:
         sigmas_train_oob["knn_res"] = de_knn_res.apply()
-        sigmas_cal_oob["knn_res"] = sigma_cal_res
-        sigmas_test_oob["knn_res"] = sigmas_comp["knn_res"]
 
     # Random Forest variance
     # unlike the KNN estimators above, de.apply(X) for the variance estimator
     # DOES depend on the oob flag (the oob branch expects X sized to the
-    # training set), so cal/test must keep using the separate non-oob fit.
+    # training set)
     de_var = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop)
-    conf_intervals["var"], sigma_cal_var, sigmas_comp["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, config.confidence)
+    conf_intervals["var"], sigmas_cal["var"], sigmas_test["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, config.confidence)
     if config.data_augmentation.sigma_var:
         de_var_oob = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop, oob=True)
         sigmas_train_oob["var"] = de_var_oob.apply()
-        sigmas_cal_oob["var"] = sigma_cal_var
-        sigmas_test_oob["var"] = sigmas_comp["var"]
 
     # Mondrian CP using variance
     min_points = int(1 / (1-config.confidence) - 1) + 1
-    bin_thresholds = find_bin_thresholds_with_min_size(sigma_cal_var, min_points, random_seed)
+    bin_thresholds = find_bin_thresholds_with_min_size(sigmas_cal["var"], min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
@@ -188,25 +184,24 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
     regressor_mond = WrapRegressor(learner_prop)
     regressor_mond.calibrate(X_cal, y_cal, mc=mondrian_categories)
-    sigmas_comp["mondrian_cp"] = np.ones(len(X_test))
+    sigmas_cal["mondrian_cp"] = np.ones(len(X_cal))
+    sigmas_test["mondrian_cp"] = np.ones(len(X_test))
     conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=config.confidence)
 
     # augment input using sigmas
     X_train_sr = np.zeros((X_prop_train.shape[0], len(sigmas_train_oob)), dtype=np.float32)
-    X_cal_sr = np.zeros((X_cal.shape[0], len(sigmas_cal_oob)), dtype=np.float32)
-    X_test_sr = np.zeros((X_test.shape[0], len(sigmas_test_oob)), dtype=np.float32)
+    X_cal_sr = np.zeros((X_cal.shape[0], len(sigmas_train_oob)), dtype=np.float32)
+    X_test_sr = np.zeros((X_test.shape[0], len(sigmas_train_oob)), dtype=np.float32)
     for i, key in enumerate(sigmas_train_oob.keys()):
             X_train_sr[:,i] = sigmas_train_oob[key]
-            X_cal_sr[:,i] = sigmas_cal_oob[key]
-            X_test_sr[:,i] = sigmas_test_oob[key]
+            X_cal_sr[:,i] = sigmas_cal[key]
+            X_test_sr[:,i] = sigmas_test[key]
     X_train_sr = np.concatenate((X_prop_train, X_train_sr), axis=1)
     X_cal_sr = np.concatenate((X_cal, X_cal_sr), axis=1)
     X_test_sr = np.concatenate((X_test, X_test_sr), axis=1)
 
     y_pred_oob = learner_prop.oob_prediction_
     residuals_prop_oob = y_prop_train - y_pred_oob
-
-    abs_res_test = np.abs(y_test_pred - y_test)
 
     sigma_losses = {
         "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), residuals_prop_oob),
@@ -237,11 +232,14 @@ def run_single_task(dataset, task_folder, config, random_seed):
         # Hall of Fame equations
         df_hof = pd.read_csv(sigma_predictor.get_equation_file())
         df_hof["Chosen"] = (df_hof.index == sigma_predictor.get_best().name) # get_best method returns best equation according to model_selection parameter
-        df_hof["sigmas"] = pd.Series([None] * len(df_hof), index=df_hof.index, dtype=object)
         df_hof.set_index("Complexity", inplace=True)
 
-        equation_binned_stats = {}
+        sigmas_cal_hof = {}
+        sigmas_test_hof = {}
+        conf_intervals_hof = {}
         for idx in range(len(df_hof)):
+            complexity = df_hof.index[idx]
+
             def sigma_f(X, idx=idx):
                 # equation predicts log(sigma); an equation using its own "exp"
                 # node can overflow once exponentiated here, so clip in
@@ -250,25 +248,20 @@ def run_single_task(dataset, task_folder, config, random_seed):
                 log_sigma = np.nan_to_num(log_sigma, nan=50.0)
                 return np.exp(np.clip(log_sigma, -50.0, 50.0))
 
-            de = DifficultyEstimator()
-            de.fit(X_train_sr, f=sigma_f, scaler=True)
-            sigmas_cal_sr = de.apply(X_cal_sr)
-            sigmas_test_sr = de.apply(X_test_sr)
-
-            # WrapRegressor.calibrate()/.predict_int() feed the SAME X to both the
-            # wrapped learner (needs the raw data) and de.apply() (needs the
-            # sigma-augmented columns) — incompatible here, so calibrate manually via
-            # the lower-level ConformalRegressor instead.
-            cr = ConformalRegressor()
-            cr.fit(y_cal - learner_prop.predict(X_cal), sigmas=sigmas_cal_sr)
-    
-            ci_intervals = cr.predict_int(
-                learner_prop.predict(X_test), sigmas=sigmas_test_sr, confidence=config.confidence
-            )
+            de_hof = DifficultyEstimator()
+            de_hof.fit(X_train_sr, f=sigma_f, scaler=True)
+            conf_intervals_hof[complexity], sigmas_cal_hof[complexity], sigmas_test_hof[complexity] = compute_normalized_intervals(
+                de=de_hof,
+                learner_prop=learner_prop, 
+                X_cal=X_cal_sr, 
+                y_cal=y_cal, 
+                X_test=X_test_sr, 
+                confidence=config.confidence)
 
             if df_hof.iloc[idx]["Chosen"]:
-                conf_intervals[f"sr_{loss_name}"] = ci_intervals
-                sigmas_comp[f"sr_{loss_name}"] = sigmas_test_sr
+                conf_intervals[f"sr_{loss_name}"] = conf_intervals_hof[complexity]
+                sigmas_cal[f"sr_{loss_name}"] = sigmas_cal_hof[complexity]
+                sigmas_test[f"sr_{loss_name}"] = sigmas_test_hof[complexity]
 
             ci_mean, ci_median, coverage = compute_ci_stats(conf_intervals_hof[complexity], y_test)
             df_hof.loc[complexity, "ci_median"] = ci_median
@@ -368,7 +361,7 @@ def run_all_tasks(config, random_seed):
     for dataset in iter_datasets(config):
 
         # TODO: Remove for all datasets
-        if dataset.name != "abalone":
+        if dataset.name != "forest_fires":
             continue
         print(dataset)
 
@@ -385,8 +378,6 @@ def run_all_tasks(config, random_seed):
             results_dictionary[f"{method}_mean"].append(ci_means[method])
             results_dictionary[f"{method}_median"].append(ci_medians[method])
             results_dictionary[f"{method}_coverage"].append(coverages[method])
-
-        plot_target_distribution(dataset.df_y.values, dataset.name, os.path.join(task_folder, "target_distribution.png"))
 
         df_results = pd.DataFrame.from_dict(results_dictionary)
         df_results.to_csv(os.path.join(results_folder, "results.csv"), index=False)
