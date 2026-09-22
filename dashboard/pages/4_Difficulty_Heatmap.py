@@ -24,7 +24,6 @@ import math
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -85,23 +84,6 @@ deciles_by_dataset = {
 metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="heatmap_metric")
 if metric == "Coverage":
     st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
-elif metric == "Median width":
-    st.caption("Color is log-scaled (a linear scale gets washed out by a single wide outlier cell); hover shows the actual width.")
-
-
-def color_z(matrix, metric):
-    """The matrix actually driving cell *color* -- log10 for Median width,
-    so one outlier cell doesn't stretch the whole scale and wash out every
-    other cell's color (interval width is strictly positive and often
-    right-skewed, same reason sigma itself is log-scaled elsewhere in this
-    dashboard). Coverage is already a bounded [0, 1] rate, no such skew, so
-    it's used as-is. Hover text always shows the true (linear) value via
-    `customdata`, never this transformed matrix, so it stays directly
-    readable regardless of how color is computed.
-    """
-    if metric == "Median width":
-        return np.log10(matrix.clip(lower=1e-12))
-    return matrix
 
 
 def build_matrix(method, metric):
@@ -141,8 +123,7 @@ with tab_grid:
     for m in all_methods:
         matrix, *_ = build_matrix(m, metric)
         matrices[m] = matrix
-        finite = color_z(matrix, metric).values
-        finite = finite[~pd.isna(finite)]
+        finite = matrix.values[~pd.isna(matrix.values)]
         if finite.size:
             zmin = finite.min() if zmin is None else min(zmin, finite.min())
             zmax = finite.max() if zmax is None else max(zmax, finite.max())
@@ -152,14 +133,13 @@ with tab_grid:
         matrix = matrices[m]
         fig.add_trace(
             go.Heatmap(
-                z=color_z(matrix, metric).values,
-                customdata=matrix.values,
+                z=matrix.values,
                 x=[f"D{c + 1}" for c in matrix.columns],
                 y=matrix.index,
                 coloraxis="coloraxis",
                 hovertemplate=(
                     f"<b>{data.method_label(m)}</b><br>dataset=%{{y}}<br>residual decile=%{{x}}<br>"
-                    + metric.lower() + "=%{customdata:.3f}<extra></extra>"
+                    + metric.lower() + "=%{z:.3f}<extra></extra>"
                 ),
             ),
             row=row, col=col,
@@ -172,7 +152,7 @@ with tab_grid:
         # it from staying centered on target_coverage.
         coloraxis = dict(colorscale=COVERAGE_COLORSCALE, cmid=target_coverage, colorbar=dict(title=metric))
     else:
-        coloraxis = dict(colorscale="Blues", cmin=zmin, cmax=zmax, colorbar=dict(title="log10(Median width)"))
+        coloraxis = dict(colorscale="Blues", cmin=zmin, cmax=zmax, colorbar=dict(title=metric))
     fig.update_layout(
         width=cols * 480, height=rows_n * panel_height,
         coloraxis=coloraxis,
@@ -198,19 +178,16 @@ with tab_detail:
         st.caption(f"{included} dataset(s) included, {excluded} excluded (no per-point data).")
 
     if metric == "Coverage":
-        color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage, colorbar=dict(title=metric))
+        color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage)
     else:
-        color_kwargs = dict(colorscale="Blues", colorbar=dict(title="log10(Median width)"))
+        color_kwargs = dict(colorscale="Blues")
     fig = go.Figure(
         data=go.Heatmap(
-            z=color_z(matrix_present, metric).values,
-            customdata=matrix_present.values,
+            z=matrix_present.values,
             x=[f"D{c + 1}" for c in matrix_present.columns],
             y=matrix_present.index,
-            hovertemplate=(
-                "dataset=%{y}<br>residual decile=%{x}<br>"
-                + metric.lower() + "=%{customdata:.3f}<extra></extra>"
-            ),
+            colorbar=dict(title=metric),
+            hovertemplate="dataset=%{y}<br>residual decile=%{x}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
             **color_kwargs,
         )
     )
