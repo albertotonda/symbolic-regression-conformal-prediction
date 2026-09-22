@@ -29,8 +29,11 @@ run's datasets), then open a plot from the sidebar:
   than each method's own sigma rank, so columns are directly comparable
   method-to-method
 - Sigma Ridgeline
-- Hall of Fame Trade-off — every SR equation on the complexity/loss Pareto
-  front, scattered by (coverage, width)
+- Hall of Fame — one dataset/loss's SR equations, four tabs: Trade-off
+  (coverage vs. width, colored by complexity), Sigma vs Outcome (each
+  equation's own sigma vs. residual/width, unbinned), Sigma vs Coverage
+  (sliding-window coverage per equation), Complexity x Decile (heatmap,
+  rows = complexity, columns = residual-rank decile)
 - Dataset Characteristics — method width ratio vs. dataset size/features/R2
 - Method Head-to-Head — per-point width comparison between two methods
 - Training Dynamics — SR loss-vs-iteration curves and a convergence-speed

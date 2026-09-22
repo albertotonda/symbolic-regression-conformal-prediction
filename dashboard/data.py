@@ -284,6 +284,52 @@ def load_hof(run_path: str, dataset_name: str, loss_name: str) -> pd.DataFrame |
     return pd.read_csv(path, index_col="Complexity")
 
 
+def has_hof_per_point_data(run_path: str, dataset_name: str, loss_name: str) -> bool:
+    dataset_dir = Path(run_path) / dataset_name
+    return (
+        (dataset_dir / "testing_data.csv").exists()
+        and (dataset_dir / f"hof_sigmas_test_{loss_name}.csv").exists()
+        and (dataset_dir / f"hof_intervals_{loss_name}.csv").exists()
+    )
+
+
+@st.cache_data
+def load_hof_per_point(run_path: str, dataset_name: str, loss_name: str) -> pd.DataFrame | None:
+    """Per-test-point sigma/width/coverage for *every* Hall-of-Fame equation
+    (keyed by complexity, not method) + the base regressor's absolute
+    residual, for one dataset/loss -- the per-equation analogue of
+    `load_per_point` (which is per-method). Same three
+    `{abs_residual, sigma_<complexity>, width_<complexity>, covered_<complexity>}`
+    column shape, so the same per-point analysis logic works on either.
+    """
+    if not has_hof_per_point_data(run_path, dataset_name, loss_name):
+        return None
+    dataset_dir = Path(run_path) / dataset_name
+
+    testing = pd.read_csv(dataset_dir / "testing_data.csv", index_col="index")
+    sigmas = pd.read_csv(dataset_dir / f"hof_sigmas_test_{loss_name}.csv", index_col="index")
+    intervals = pd.read_csv(dataset_dir / f"hof_intervals_{loss_name}.csv")
+
+    df = pd.DataFrame(index=testing.index)
+    df["abs_residual"] = testing["residuals"].abs()
+    for col in sigmas.columns:
+        complexity = int(col)
+        eq_intervals = intervals.loc[intervals["complexity"] == complexity].set_index("index")
+        df[f"sigma_{complexity}"] = sigmas[col]
+        df[f"width_{complexity}"] = eq_intervals["upper_bound"] - eq_intervals["lower_bound"]
+        df[f"covered_{complexity}"] = (
+            (testing["y"] >= eq_intervals["lower_bound"]) & (testing["y"] <= eq_intervals["upper_bound"])
+        )
+
+    return df.reset_index(drop=True)
+
+
+def hof_per_point_complexities(df: pd.DataFrame) -> list[int]:
+    """Complexity values with per-point data in a `load_hof_per_point`
+    frame, ascending."""
+    return sorted(int(c[len("sigma_"):]) for c in df.columns if c.startswith("sigma_"))
+
+
 @st.cache_data
 def load_dataset_characteristics() -> pd.DataFrame:
     """Static per-dataset metadata from the OpenML-CTR23 suite (n_samples,
