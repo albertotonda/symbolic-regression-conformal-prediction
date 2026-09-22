@@ -15,8 +15,6 @@ from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.metrics import r2_score
 
 from pysr import PySRRegressor
-from pysr.julia_import import SymbolicRegression, jl
-from pysr.julia_helpers import jl_array
 from pysr.logger_specs import TensorBoardLoggerSpec
 
 import openml
@@ -37,63 +35,6 @@ from utils.config import load_config, dump_config
 SIGMA_SR_EXTRA_SYMPY_MAPPINGS = {
     "logm": lambda x: sympy.log(sympy.Abs(x) + 1e-8),
 }
-
-def extract_all_equations(model) -> pd.DataFrame:
-    """Every individual in the final population(s) of a fitted PySRRegressor,
-    as a flat DataFrame with `output_index`, `complexity`, `loss`, `cost`, `equation`.
-    """
-    populations, _hof = model.julia_state_
-    options = model.julia_options_
-    variable_names = jl_array([str(v) for v in model.feature_names_in_])
-
-    nout = getattr(model, "nout_", 1)
-    rows = []
-    for j in range(nout):
-        for pop in populations[j]:
-            for member in pop.members:
-                rows.append(
-                    {
-                        "output_index": j,
-                        "complexity": int(
-                            SymbolicRegression.compute_complexity(member, options)
-                        ),
-                        "loss": float(member.loss),
-                        "cost": float(member.cost),
-                        "equation": str(
-                            SymbolicRegression.string_tree(
-                                member.tree, options, variable_names=variable_names
-                            )
-                        ),
-                    }
-                )
-    return pd.DataFrame(rows)
-
-
-def compute_pareto_fronts(df: pd.DataFrame, n_fronts: int = 1) -> list:
-    """Peel successive Pareto fronts out of a DataFrame of equations
-    (needs `complexity`, `loss`, `cost` columns -- one output at a time).
-
-    Matches SymbolicRegression.jl's own dominance rule in pure pandas: the
-    best-cost individual at each complexity, then only those whose loss beats
-    every smaller-complexity survivor (front 1); peeling those off and
-    repeating gives front 2, 3, ...
-    """
-    remaining = (
-        df.loc[df.groupby("complexity")["cost"].idxmin()]
-        .sort_values("complexity")
-        .reset_index(drop=True)
-    )
-
-    fronts = []
-    for _ in range(n_fronts):
-        if remaining.empty:
-            break
-        running_min = remaining["loss"].shift().cummin().fillna(np.inf)
-        on_front = remaining["loss"] < running_min
-        fronts.append(remaining[on_front].reset_index(drop=True))
-        remaining = remaining[~on_front]
-    return fronts
-
 
 def run_single_task(dataset, task_folder, config, random_seed):
 

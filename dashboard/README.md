@@ -18,7 +18,12 @@ for consistent method labels/colors.
 ```
 
 Opens at http://localhost:8501. Pick a results run on the home page, then
-open a plot from the sidebar (currently: Pareto width vs. coverage).
+open a plot from the sidebar:
+- Pareto: Width vs Coverage
+- Sigma vs Residuals
+- Width by Residual Rank
+- Difficulty Heatmap
+- Sigma Ridgeline
 
 ## Adding a new plot
 
