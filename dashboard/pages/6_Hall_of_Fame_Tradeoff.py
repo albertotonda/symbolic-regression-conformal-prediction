@@ -233,8 +233,6 @@ with tab_heatmap:
         heatmap_metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="hof_heatmap_metric")
         if heatmap_metric == "Coverage":
             st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
-        else:
-            st.caption("Color is log-scaled (a linear scale gets washed out by a single wide outlier cell); hover shows the actual width.")
 
         deciles = pd.qcut(df_pp["abs_residual"].rank(method="first"), N_DECILES, labels=False)
         rows_dict = {}
@@ -245,23 +243,19 @@ with tab_heatmap:
 
         matrix = pd.DataFrame.from_dict(rows_dict, orient="index")
         matrix = matrix.reindex(range(N_DECILES), axis=1)
-        # log10 color for Median width, same reason as 4_Difficulty_Heatmap.py's
-        # color_z: one outlier cell otherwise washes out every other cell's
-        # color. Hover always shows the true (linear) value via customdata.
-        color_z = np.log10(matrix.clip(lower=1e-12)) if heatmap_metric == "Median width" else matrix
 
         if heatmap_metric == "Coverage":
-            color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage, colorbar=dict(title=heatmap_metric))
+            color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage)
         else:
-            color_kwargs = dict(colorscale="Blues", colorbar=dict(title="log10(Median width)"))
+            color_kwargs = dict(colorscale="Blues")
         fig = go.Figure(
             data=go.Heatmap(
-                z=color_z.values,
-                customdata=matrix.values,
+                z=matrix.values,
                 x=[f"D{c + 1}" for c in matrix.columns],
                 y=matrix.index,
+                colorbar=dict(title=heatmap_metric),
                 hovertemplate=(
-                    "%{y}<br>residual decile=%{x}<br>" + heatmap_metric.lower() + "=%{customdata:.3f}<extra></extra>"
+                    "%{y}<br>residual decile=%{x}<br>" + heatmap_metric.lower() + "=%{z:.3f}<extra></extra>"
                 ),
                 **color_kwargs,
             )

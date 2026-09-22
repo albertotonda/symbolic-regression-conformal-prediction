@@ -181,6 +181,18 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
         steps, losses = read_tensorboard_scalar(tb_log_dir, "search/data/summaries/min_loss")
         plot_loss_curve(steps, losses, loss_name, os.path.join(task_folder, f"loss_curve_{loss_name}.png"))
+        # Also save the raw (step, loss) series as a small CSV: the
+        # TensorBoard log itself is far more expensive to read back later
+        # (it logs many other tags -- per-complexity equation losses, full
+        # equation-string tensors, population-complexity histograms -- that
+        # TensorBoard's EventAccumulator fully parses on Reload() regardless
+        # of which single tag is wanted, ~100+MB/several seconds per
+        # dataset). The dashboard's Training Dynamics page reads this CSV
+        # instead, falling back to the slow path only for older runs that
+        # don't have it.
+        pd.DataFrame({"step": steps, "loss": losses}).to_csv(
+            os.path.join(task_folder, f"loss_curve_{loss_name}.csv"), index=False
+        )
 
         # Hall of Fame equations
         df_hof = pd.read_csv(sigma_predictor.get_equation_file())

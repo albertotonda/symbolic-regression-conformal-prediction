@@ -422,17 +422,46 @@ def tb_log_dir(run_path: str, dataset_name: str, loss_name: str) -> Path:
     return Path(run_path) / dataset_name / "tb_logs" / loss_name
 
 
+def _loss_curve_cache_path(run_path: str, dataset_name: str, loss_name: str) -> Path:
+    return Path(run_path) / dataset_name / f"loss_curve_{loss_name}.csv"
+
+
 @st.cache_data
 def load_loss_curve(run_path: str, dataset_name: str, loss_name: str):
-    """(steps, losses) for one dataset/loss's SR search, read from its
-    TensorBoard log (`search/data/summaries/min_loss`, the best loss on the
-    Pareto front, logged every iteration). Returns (None, None) if no log
-    directory exists for this dataset/loss."""
+    """(steps, losses) for one dataset/loss's SR search (the best loss on
+    the Pareto front, logged every iteration).
+
+    Prefers the precomputed `loss_curve_<loss>.csv` (step,loss columns)
+    that `run_sigma_sr.py` saves alongside its PNG plot, since reading it
+    back from the raw TensorBoard log is expensive: the SR search logs many
+    other tags too (per-complexity equation losses, full equation-string
+    tensors, population-complexity histograms), and TensorBoard's
+    EventAccumulator fully parses all of them on `Reload()` regardless of
+    which single tag is actually wanted -- observed at ~7s and 100+MB per
+    dataset on a real run, which multiplies fast across dozens of datasets.
+    Falls back to that slow path for older runs that predate the CSV, and
+    then writes it out as a cache so the next read of this same
+    dataset/loss is fast too (best-effort -- silently skipped if the run
+    folder isn't writable).
+
+    Returns (None, None) if neither the CSV nor a TensorBoard log exists.
+    """
+    cache_path = _loss_curve_cache_path(run_path, dataset_name, loss_name)
+    if cache_path.exists():
+        cached = pd.read_csv(cache_path)
+        return cached["step"].tolist(), cached["loss"].tolist()
+
     log_dir = tb_log_dir(run_path, dataset_name, loss_name)
     if not log_dir.exists():
         return None, None
     from src.utils.utils import read_tensorboard_scalar
-    return read_tensorboard_scalar(str(log_dir), "search/data/summaries/min_loss")
+    steps, losses = read_tensorboard_scalar(str(log_dir), "search/data/summaries/min_loss")
+
+    try:
+        pd.DataFrame({"step": steps, "loss": losses}).to_csv(cache_path, index=False)
+    except OSError:
+        pass
+    return steps, losses
 
 
 def compute_convergence_step(steps, losses, tolerance=1e-3):
