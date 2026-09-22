@@ -22,6 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import data  # noqa: E402
 
 N_DECILES = 10
+# Diverging around target coverage: white = perfect, red = over-covered,
+# blue = under-covered. Reuses the dashboard's own blue/rust hues (see
+# data.py's _CATEGORICAL_PALETTE) instead of a stock RdBu scale, so the
+# under/over direction is unambiguous regardless of a colorscale's default
+# orientation.
+COVERAGE_COLORSCALE = [
+    [0.0, "#2b6bab"],
+    [0.5, "#ffffff"],
+    [1.0, "#ab4b2b"],
+]
 
 st.set_page_config(page_title="Difficulty Heatmap", layout="wide")
 st.title("Coverage / width by difficulty decile")
@@ -50,8 +60,11 @@ if not per_point_by_dataset:
     st.stop()
 
 all_methods = sorted({m for df in per_point_by_dataset.values() for m in data.per_point_methods(df)})
+target_coverage = data.target_coverage(run_path)
 
 metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="heatmap_metric")
+if metric == "Coverage":
+    st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
 
 
 def build_matrix(method, metric):
@@ -130,9 +143,16 @@ with tab_grid:
         )
 
     panel_height = max(220, 22 * len(all_datasets) + 90)
+    if metric == "Coverage":
+        # cmid needs cauto (the Plotly default), so cmin/cmax are left unset
+        # here -- passing them alongside cmid would pin the range and stop
+        # it from staying centered on target_coverage.
+        coloraxis = dict(colorscale=COVERAGE_COLORSCALE, cmid=target_coverage, colorbar=dict(title=metric))
+    else:
+        coloraxis = dict(colorscale="Blues", cmin=zmin, cmax=zmax, colorbar=dict(title=metric))
     fig.update_layout(
         width=cols * 480, height=rows_n * panel_height,
-        coloraxis=dict(colorscale="Blues", cmin=zmin, cmax=zmax, colorbar=dict(title=metric)),
+        coloraxis=coloraxis,
         title=f"{metric} by difficulty decile — all methods",
     )
     st.plotly_chart(fig, width="content")
@@ -164,14 +184,18 @@ with tab_detail:
             f"{constant_sigma} excluded (constant sigma for this method)."
         )
 
+    if metric == "Coverage":
+        color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage)
+    else:
+        color_kwargs = dict(colorscale="Blues")
     fig = go.Figure(
         data=go.Heatmap(
             z=matrix_present.values,
             x=[f"D{c + 1}" for c in matrix_present.columns],
             y=matrix_present.index,
-            colorscale="Blues",
             colorbar=dict(title=metric),
             hovertemplate="dataset=%{y}<br>decile=%{x}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
+            **color_kwargs,
         )
     )
     fig.update_layout(
