@@ -204,6 +204,39 @@ def load_per_point(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     return df.reset_index(drop=True)
 
 
+def has_calibration_per_point_data(run_path: str, dataset_name: str) -> bool:
+    dataset_dir = Path(run_path) / dataset_name
+    return (dataset_dir / "calibration_data.csv").exists() and (dataset_dir / "methods_sigmas_cal.csv").exists()
+
+
+@st.cache_data
+def load_per_point_calibration(run_path: str, dataset_name: str) -> pd.DataFrame | None:
+    """Per-calibration-point sigma + the base regressor's absolute residual,
+    for one dataset -- the calibration-side counterpart of `load_per_point`.
+    No `width`/`covered` columns: those aren't defined for calibration
+    points in split conformal (the calibration set sets the quantile, it
+    never gets its own prediction interval), so only `sigma_<method>` and
+    `abs_residual` exist here. Only supports the current
+    (`calibration_data.csv` + `methods_sigmas_cal.csv`) format -- there's no
+    calibration-side equivalent of the older `per_point.csv`.
+    """
+    dataset_dir = Path(run_path) / dataset_name
+    cal_path = dataset_dir / "calibration_data.csv"
+    sigmas_path = dataset_dir / "methods_sigmas_cal.csv"
+    if not (cal_path.exists() and sigmas_path.exists()):
+        return None
+
+    calibration = pd.read_csv(cal_path, index_col="index")
+    sigmas = pd.read_csv(sigmas_path, index_col="index")
+
+    df = pd.DataFrame(index=calibration.index)
+    df["abs_residual"] = calibration["residuals"].abs()
+    for method in sigmas.columns:
+        df[f"sigma_{method}"] = sigmas[method]
+
+    return df.reset_index(drop=True)
+
+
 def per_point_methods(df: pd.DataFrame) -> list[str]:
     """Method keys with per-point data in a per_point.csv, same ordering
     convention as discover_methods()."""

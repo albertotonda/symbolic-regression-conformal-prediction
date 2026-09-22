@@ -21,9 +21,13 @@ Opens at http://localhost:8501. Pick a results run on the home page (which
 also shows a method leaderboard: Pareto-non-dominance counts across the
 run's datasets), then open a plot from the sidebar:
 - Pareto: Width vs Coverage
-- Sigma vs Residuals
+- Sigma Relationships — sigma vs. residual (calibration or test) or width
+  (test only), unbinned, one subplot per method
 - Width by Residual Rank
-- Difficulty Heatmap (grid across all methods, or single-method detail)
+- Difficulty Heatmap — coverage/width by residual-rank decile (grid across
+  all methods, or single-method detail); binned on residual rank rather
+  than each method's own sigma rank, so columns are directly comparable
+  method-to-method
 - Sigma Ridgeline
 - Hall of Fame Trade-off — every SR equation on the complexity/loss Pareto
   front, scattered by (coverage, width)
@@ -33,6 +37,8 @@ run's datasets), then open a plot from the sidebar:
   comparison across datasets
 - Confidence Intervals — sanity-check view of actual/predicted/interval
   band for a handful of test points
+- Sigma vs Coverage — sliding-window empirical coverage over each method's
+  own sorted sigma, one subplot per method
 
 ## Adding a new plot
 

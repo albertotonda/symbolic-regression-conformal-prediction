@@ -1,12 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Heatmap: rows = datasets, columns = difficulty (sigma) deciles --
-coverage or median width within each (dataset, decile) cell, binned
-independently per dataset since sigma scale varies by dataset.
+"""Heatmap: rows = datasets, columns = residual-rank deciles -- coverage or
+median width within each (dataset, decile) cell.
+
+Binned on the base regressor's *absolute residual* rank, not each method's
+own sigma rank: sigma is a per-method estimate, so a method's own sigma
+deciles order test points differently from another method's -- binning by
+sigma would make column "D5" mean a different set of points in every
+method's panel, silently comparing different points side by side. Binning
+by residual rank instead means every method's decile columns condition on
+the exact same points (the ones actually hardest to predict), which is
+what makes the Grid view's method-to-method comparison meaningful. This
+also means a method with a constant sigma (standard_cp, mondrian_cp) is no
+longer excluded -- unlike a sigma-rank bin, a residual-rank bin is always
+well-defined regardless of what the method's own difficulty estimate looks
+like.
 
 A grid view shows every method side by side (same dataset row order and
-color scale in every panel, so conditional-coverage/width patterns are
-directly comparable method-to-method); a detail view shows one method at a
-time, larger.
+color scale in every panel); a detail view shows one method at a time,
+larger.
 """
 
 import math
@@ -34,7 +45,7 @@ COVERAGE_COLORSCALE = [
 ]
 
 st.set_page_config(page_title="Difficulty Heatmap", layout="wide")
-st.title("Coverage / width by difficulty decile")
+st.title("Coverage / width by residual-rank decile")
 
 run_path = st.session_state.get("run_path")
 if run_path is None:
@@ -62,6 +73,14 @@ if not per_point_by_dataset:
 all_methods = sorted({m for df in per_point_by_dataset.values() for m in data.per_point_methods(df)})
 target_coverage = data.target_coverage(run_path)
 
+# one decile assignment per dataset, shared by every method (see module
+# docstring) -- ranked first so tied residuals (rare, but possible) still
+# always split into exactly N_DECILES equal-size bins via qcut.
+deciles_by_dataset = {
+    ds: pd.qcut(df["abs_residual"].rank(method="first"), N_DECILES, labels=False)
+    for ds, df in per_point_by_dataset.items()
+}
+
 metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="heatmap_metric")
 if metric == "Coverage":
     st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
@@ -69,41 +88,25 @@ if metric == "Coverage":
 
 def build_matrix(method, metric):
     """Full-`all_datasets`-shaped decile matrix for one method (NaN rows for
-    datasets excluded because they have no per-point data, or a constant
-    sigma that can't be split into deciles), plus exclusion counts."""
-    sigma_col = f"sigma_{method}"
+    datasets excluded because they have no per-point data for it), plus the
+    exclusion count."""
     value_col = f"covered_{method}" if metric == "Coverage" else f"width_{method}"
 
     rows = {}
-    excluded, constant_sigma = 0, 0
+    excluded = 0
     for ds in all_datasets:
         df = per_point_by_dataset.get(ds)
-        if df is None or sigma_col not in df.columns:
+        if df is None or value_col not in df.columns:
             excluded += 1
             continue
-        if df[sigma_col].nunique() <= 1:
-            # a constant sigma (e.g. standard_cp/mondrian_cp, which don't have a
-            # real per-point difficulty score) can't be split into deciles --
-            # pd.qcut quietly returns all-NaN bins rather than raising, so this
-            # would otherwise render a blank row instead of a clear message.
-            constant_sigma += 1
-            continue
-        # rank first, then qcut the ranks: with plain qcut, tied sigma values
-        # (common for e.g. the ensemble-variance estimator) make duplicates="drop"
-        # silently collapse to fewer than N_DECILES bins -- and a *different*
-        # bin count per dataset means column "D9" isn't the same difficulty
-        # percentile in every row, which breaks the whole point of this heatmap
-        # (comparing datasets side by side). Ranking first guarantees unique
-        # values, so every dataset always gets exactly N_DECILES equal-size bins.
-        deciles = pd.qcut(df[sigma_col].rank(method="first"), N_DECILES, labels=False)
-        agg = df.groupby(deciles)[value_col].agg("mean" if metric == "Coverage" else "median")
+        agg = df.groupby(deciles_by_dataset[ds])[value_col].agg("mean" if metric == "Coverage" else "median")
         rows[ds] = {int(d): agg.loc[d] for d in agg.index}
 
     matrix = pd.DataFrame.from_dict(rows, orient="index")
     matrix = matrix.reindex(all_datasets, axis=0)
     matrix = matrix.reindex(range(N_DECILES), axis=1)
-    included = len(all_datasets) - excluded - constant_sigma
-    return matrix, included, excluded, constant_sigma
+    included = len(all_datasets) - excluded
+    return matrix, included, excluded
 
 
 tab_grid, tab_detail = st.tabs(["Grid (all methods)", "Single method (detail)"])
@@ -135,7 +138,7 @@ with tab_grid:
                 y=matrix.index,
                 coloraxis="coloraxis",
                 hovertemplate=(
-                    f"<b>{data.method_label(m)}</b><br>dataset=%{{y}}<br>decile=%{{x}}<br>"
+                    f"<b>{data.method_label(m)}</b><br>dataset=%{{y}}<br>residual decile=%{{x}}<br>"
                     + metric.lower() + "=%{z:.3f}<extra></extra>"
                 ),
             ),
@@ -153,7 +156,7 @@ with tab_grid:
     fig.update_layout(
         width=cols * 480, height=rows_n * panel_height,
         coloraxis=coloraxis,
-        title=f"{metric} by difficulty decile — all methods",
+        title=f"{metric} by residual-rank decile — all methods",
     )
     st.plotly_chart(fig, width="content")
 
@@ -161,28 +164,18 @@ with tab_detail:
     method = st.selectbox(
         "Method", options=all_methods, format_func=data.method_label, key="heatmap_method",
     )
-    matrix, included, excluded, constant_sigma = build_matrix(method, metric)
+    matrix, included, excluded = build_matrix(method, metric)
     matrix_present = matrix.dropna(how="all")
 
     if matrix_present.empty:
-        if constant_sigma:
-            st.info(
-                f"**{data.method_label(method)}** doesn't have a real per-point difficulty "
-                "score (its sigma is constant), so it can't be split into difficulty deciles. "
-                "Pick a different method."
-            )
-        else:
-            st.info(
-                f"No dataset in this run has per-point data for **{data.method_label(method)}**. "
-                "Pick a different method, or a newer run."
-            )
+        st.info(
+            f"No dataset in this run has per-point data for **{data.method_label(method)}**. "
+            "Pick a different method, or a newer run."
+        )
         st.stop()
 
-    if excluded or constant_sigma:
-        st.caption(
-            f"{included} dataset(s) included, {excluded} excluded (no per-point data), "
-            f"{constant_sigma} excluded (constant sigma for this method)."
-        )
+    if excluded:
+        st.caption(f"{included} dataset(s) included, {excluded} excluded (no per-point data).")
 
     if metric == "Coverage":
         color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage)
@@ -194,15 +187,15 @@ with tab_detail:
             x=[f"D{c + 1}" for c in matrix_present.columns],
             y=matrix_present.index,
             colorbar=dict(title=metric),
-            hovertemplate="dataset=%{y}<br>decile=%{x}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
+            hovertemplate="dataset=%{y}<br>residual decile=%{x}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
             **color_kwargs,
         )
     )
     fig.update_layout(
         width=data.DETAIL_SIZE,
         height=max(data.DETAIL_SIZE * 0.5, 40 * len(matrix_present.index) + 150),
-        xaxis_title="Difficulty decile (increasing sigma)",
+        xaxis_title="Residual-rank decile (increasing |residual|)",
         yaxis_title=None,
-        title=f"{metric} by difficulty decile — {data.method_label(method)}",
+        title=f"{metric} by residual-rank decile — {data.method_label(method)}",
     )
     st.plotly_chart(fig, width="content")
