@@ -13,6 +13,7 @@ import hashlib
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 import yaml
@@ -126,6 +127,36 @@ def has_per_point_data(run_path: str, dataset_name: str) -> bool:
     return paths["testing"].exists() and paths["sigmas"].exists() and paths["intervals"].exists()
 
 
+def has_interval_detail_data(run_path: str, dataset_name: str) -> bool:
+    """Whether raw per-point (y, y_pred, lower_bound, upper_bound) can be
+    reconstructed for this dataset -- needs the current `testing_data.csv` +
+    `methods_intervals.csv` format; unlike `has_per_point_data`, the older
+    `per_point.csv` format doesn't qualify since it only ever stored derived
+    width/coverage, not the raw prediction or interval bounds."""
+    paths = _per_point_source_files(run_path, dataset_name)
+    return paths["testing"].exists() and paths["intervals"].exists()
+
+
+@st.cache_data
+def load_testing_data(run_path: str, dataset_name: str) -> pd.DataFrame | None:
+    """Raw test-set (y, y_pred, residuals), indexed the same 0-based way as
+    `methods_intervals.csv`."""
+    path = _per_point_source_files(run_path, dataset_name)["testing"]
+    if not path.exists():
+        return None
+    return pd.read_csv(path, index_col="index")
+
+
+@st.cache_data
+def load_intervals(run_path: str, dataset_name: str) -> pd.DataFrame | None:
+    """Long-format (method, index, lower_bound, upper_bound) for every
+    method on this dataset's test set."""
+    path = _per_point_source_files(run_path, dataset_name)["intervals"]
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
 @st.cache_data
 def load_per_point(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     """Per-test-point sigma/width/coverage per method + the base
@@ -192,3 +223,156 @@ def method_color(method: str) -> str:
     hue = int(digest[:8], 16) / 0xFFFFFFFF
     r, g, b = colorsys.hls_to_rgb(hue, 0.45, 0.55)
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
+def discover_losses(run_path: str, dataset_name: str) -> list[str]:
+    """SR loss names with a `hof_<loss>.csv` in a dataset's folder (as
+    opposed to the per-loss `hof_intervals_<loss>.csv`/
+    `hof_sigmas_cal_<loss>.csv`/`hof_sigmas_test_<loss>.csv` siblings, which
+    share the `hof_` prefix but aren't the main table)."""
+    dataset_dir = Path(run_path) / dataset_name
+    losses = []
+    for path in dataset_dir.glob("hof_*.csv"):
+        stem = path.stem[len("hof_"):]
+        if stem.startswith("intervals_") or stem.startswith("sigmas_cal_") or stem.startswith("sigmas_test_"):
+            continue
+        losses.append(stem)
+    return sorted(losses)
+
+
+@st.cache_data
+def load_hof(run_path: str, dataset_name: str, loss_name: str) -> pd.DataFrame | None:
+    """One SR loss's Hall of Fame for one dataset: one row per equation on
+    the complexity/loss Pareto front, indexed by `Complexity`, with columns
+    `Loss`, `Equation`, `Chosen`, `ci_median`, `ci_mean`, `coverage`."""
+    path = Path(run_path) / dataset_name / f"hof_{loss_name}.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path, index_col="Complexity")
+
+
+@st.cache_data
+def load_dataset_characteristics() -> pd.DataFrame:
+    """Static per-dataset metadata from the OpenML-CTR23 suite (n_samples,
+    n_features, missing_data, categorical_features, base-regressor R2/MSE),
+    independent of any results run -- join on `dataset_name` to relate a
+    run's per-dataset performance to what the dataset itself looks like.
+    Numeric columns are comma-formatted strings (`n_samples`) or
+    `"mean +/- std"` strings (the R2/MSE columns) in the source CSV, so both
+    are parsed down to plain floats here.
+    """
+    path = REPO_ROOT / "results" / "OpenML-CTR23-statistics-500-estimators-10-fold-cv.csv"
+    df = pd.read_csv(path)
+    for col in ("n_samples", "n_features", "missing_data", "categorical_features"):
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace(",", "").astype(int)
+    for col in df.columns:
+        if col.startswith("R2_") or col.startswith("MSE_"):
+            df[col] = df[col].astype(str).str.split(" +/- ", regex=False).str[0].astype(float)
+    return df
+
+
+def compute_pareto_dominance(df: pd.DataFrame, methods: list[str]) -> pd.DataFrame:
+    """For each dataset (row of `df`), find which of `methods` are
+    Pareto-non-dominated on (lower `<method>_median` is better, higher
+    `<method>_coverage` is better); tally non-dominated/dominated/"alone"
+    (sole non-dominated method) counts per method across all datasets.
+
+    Same dominance rule as `src/analysis/check_pareto_optimality.py`, just
+    computed live from an already-loaded results.csv instead of requiring
+    that script's separate `results-statistics.csv` to have been run.
+    """
+    counts = {m: {"non_dominated": 0, "dominated": 0, "alone": 0} for m in methods}
+
+    for _, row in df.iterrows():
+        points = {}
+        for m in methods:
+            median, coverage = row.get(f"{m}_median"), row.get(f"{m}_coverage")
+            if median is None or coverage is None or pd.isna(median) or pd.isna(coverage):
+                continue
+            points[m] = (median, coverage)
+
+        non_dominated = []
+        for m, (median, coverage) in points.items():
+            dominated = any(
+                other_median <= median and other_coverage >= coverage
+                for other_m, (other_median, other_coverage) in points.items()
+                if other_m != m
+            )
+            counts[m]["dominated" if dominated else "non_dominated"] += 1
+            if not dominated:
+                non_dominated.append(m)
+
+        if len(non_dominated) == 1:
+            counts[non_dominated[0]]["alone"] += 1
+
+    return pd.DataFrame.from_dict(counts, orient="index")
+
+
+def early_stop_params(run_path: str) -> dict:
+    """A run's `sr_params.early_stop_*` settings from its saved config.yaml
+    snapshot -- read regardless of whether `early_stop` itself was on, since
+    they're saved either way and are still useful as context (e.g. the
+    `min_relative_improvement` value doubles as a sensible default
+    `tolerance` for `compute_convergence_step`, since both express "how much
+    relative improvement counts as negligible"). Note `chunk_size` here
+    counts PySR outer iterations, not TensorBoard log steps (PySR logs
+    several points per iteration, one per population), so it can't be used
+    to replay `fit_with_early_stopping`'s block logic directly against a
+    logged curve -- that's why `compute_convergence_step` uses a
+    step-native definition instead. Defaults match
+    `fit_with_early_stopping`'s own signature defaults.
+    """
+    defaults = {"chunk_size": 1, "patience": 3, "min_relative_improvement": 1e-3}
+    config_path = Path(run_path) / "config.yaml"
+    if not config_path.exists():
+        return defaults
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    sr_params = (config or {}).get("sr_params", {})
+    return {
+        "chunk_size": sr_params.get("early_stop_chunk_size", defaults["chunk_size"]),
+        "patience": sr_params.get("early_stop_patience", defaults["patience"]),
+        "min_relative_improvement": sr_params.get(
+            "early_stop_min_improvement", defaults["min_relative_improvement"]
+        ),
+    }
+
+
+def tb_log_dir(run_path: str, dataset_name: str, loss_name: str) -> Path:
+    return Path(run_path) / dataset_name / "tb_logs" / loss_name
+
+
+@st.cache_data
+def load_loss_curve(run_path: str, dataset_name: str, loss_name: str):
+    """(steps, losses) for one dataset/loss's SR search, read from its
+    TensorBoard log (`search/data/summaries/min_loss`, the best loss on the
+    Pareto front, logged every iteration). Returns (None, None) if no log
+    directory exists for this dataset/loss."""
+    log_dir = tb_log_dir(run_path, dataset_name, loss_name)
+    if not log_dir.exists():
+        return None, None
+    from src.utils.utils import read_tensorboard_scalar
+    return read_tensorboard_scalar(str(log_dir), "search/data/summaries/min_loss")
+
+
+def compute_convergence_step(steps, losses, tolerance=1e-3):
+    """First step at which the search had already captured `1 - tolerance`
+    of its total loss improvement (initial running-best loss down to the
+    final one) -- e.g. `tolerance=1e-3` means "first step within 0.1% of
+    the run's eventual best loss, relative to how much it improved in
+    total." A convergence marker comparable across datasets/losses without
+    needing to know how PySR's own TensorBoard step counter relates to its
+    `niterations`/`populations` settings (steps aren't 1-per-iteration --
+    PySR logs several points per iteration, one per population -- so a
+    literal replay of `fit_with_early_stopping`'s iteration-block logic
+    isn't meaningful against this axis).
+    """
+    steps = np.asarray(steps)
+    running_best = np.minimum.accumulate(np.asarray(losses))
+    initial, final = running_best[0], running_best[-1]
+    total_improvement = initial - final
+    if total_improvement <= 0:
+        return steps[0]
+    threshold = final + tolerance * total_improvement
+    return steps[np.argmax(running_best <= threshold)]

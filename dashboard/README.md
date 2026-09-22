@@ -17,13 +17,22 @@ for consistent method labels/colors.
 .venv/bin/streamlit run dashboard/app.py
 ```
 
-Opens at http://localhost:8501. Pick a results run on the home page, then
-open a plot from the sidebar:
+Opens at http://localhost:8501. Pick a results run on the home page (which
+also shows a method leaderboard: Pareto-non-dominance counts across the
+run's datasets), then open a plot from the sidebar:
 - Pareto: Width vs Coverage
 - Sigma vs Residuals
 - Width by Residual Rank
-- Difficulty Heatmap
+- Difficulty Heatmap (grid across all methods, or single-method detail)
 - Sigma Ridgeline
+- Hall of Fame Trade-off — every SR equation on the complexity/loss Pareto
+  front, scattered by (coverage, width)
+- Dataset Characteristics — method width ratio vs. dataset size/features/R2
+- Method Head-to-Head — per-point width comparison between two methods
+- Training Dynamics — SR loss-vs-iteration curves and a convergence-speed
+  comparison across datasets
+- Confidence Intervals — sanity-check view of actual/predicted/interval
+  band for a handful of test points
 
 ## Adding a new plot
 

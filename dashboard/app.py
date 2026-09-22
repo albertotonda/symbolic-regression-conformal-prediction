@@ -5,6 +5,7 @@ pages/) read the selection back from st.session_state["run_path"]."""
 import sys
 from pathlib import Path
 
+import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,4 +52,33 @@ st.caption(f"Reading from `{run_path}`")
 st.info("Pick a run above, then open a plot from the sidebar.")
 
 df = data.load_results(run_path)
+
+methods = data.discover_methods(df)
+if methods:
+    st.subheader("Method leaderboard")
+    st.caption(
+        "How often each method is Pareto-non-dominated on (coverage, median width) "
+        "across this run's datasets — same dominance rule as "
+        "`src/analysis/check_pareto_optimality.py`'s `results-statistics.csv`, computed "
+        "live here instead of requiring that script to have been run first."
+    )
+    dominance = data.compute_pareto_dominance(df, methods)
+    dominance = dominance.reindex(methods).sort_values("non_dominated", ascending=True)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=[data.method_label(m) for m in dominance.index], x=dominance["non_dominated"],
+        orientation="h", name="Non-dominated",
+        marker=dict(color=[data.method_color(m) for m in dominance.index]),
+        customdata=dominance[["dominated", "alone"]].values,
+        hovertemplate="non-dominated on %{x} dataset(s)<br>alone: %{customdata[1]}<extra></extra>",
+    ))
+    fig.update_xaxes(title="Number of datasets where non-dominated")
+    fig.update_yaxes(title=None)
+    fig.update_layout(
+        width=data.DETAIL_SIZE, height=max(220, 40 * len(methods) + 80),
+        margin=dict(l=10, r=10, t=10, b=40),
+    )
+    st.plotly_chart(fig, width="content")
+
 st.dataframe(df, width="stretch")
