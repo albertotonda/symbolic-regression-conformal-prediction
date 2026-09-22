@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 """Ridgeline plot of each method's sigma distribution, for one dataset.
 
-Sigma's raw scale varies by orders of magnitude across methods (same
-reason src/utils/plotting.py's plot_sigma_distributions violin plot uses a
-log y-axis), so all lanes share a log10(sigma) x-axis. Lanes are ordered
-top-to-bottom in the canonical method order -- a density curve is
-order-invariant over the underlying points, so "sorted by increasing
-absolute residual" isn't meaningful for placing points within a lane; it
-only matters for the scatter/line plots (pages 2 and 3).
+All lanes share one linear sigma x-axis. Lanes are ordered top-to-bottom in
+the canonical method order -- a density curve is order-invariant over the
+underlying points, so "sorted by increasing absolute residual" isn't
+meaningful for placing points within a lane; it only matters for the
+scatter/line plots (pages 2 and 3).
 """
 
 import sys
@@ -89,16 +87,16 @@ if not methods:
 ordered_methods = [m for m in all_methods if m in methods]
 n = len(ordered_methods)
 
-log_sigmas = {m: np.log10(df[f"sigma_{m}"].to_numpy()) for m in ordered_methods}
-x_min = min(v.min() for v in log_sigmas.values())
-x_max = max(v.max() for v in log_sigmas.values())
+sigmas = {m: df[f"sigma_{m}"].to_numpy() for m in ordered_methods}
+x_min = min(v.min() for v in sigmas.values())
+x_max = max(v.max() for v in sigmas.values())
 pad = 0.05 * (x_max - x_min or 1.0)
 x_grid = np.linspace(x_min - pad, x_max + pad, N_GRID)
 
 fig = go.Figure()
 for i, m in enumerate(ordered_methods):
     offset = n - 1 - i  # canonical-order method 0 drawn at the top
-    kde = gaussian_kde(log_sigmas[m])
+    kde = gaussian_kde(sigmas[m])
     density = kde(x_grid)
     peak = density.max()
     scaled = (density / peak * LANE_HEIGHT) if peak > 0 else density
@@ -112,14 +110,14 @@ for i, m in enumerate(ordered_methods):
         line=dict(width=1.5, color=data.method_color(m)),
         fillcolor=_hex_to_rgba(data.method_color(m), 0.6),
         showlegend=False,
-        hovertemplate=f"<b>{data.method_label(m)}</b><br>log10(sigma)=%{{x:.2f}}<extra></extra>",
+        hovertemplate=f"<b>{data.method_label(m)}</b><br>sigma=%{{x:.3g}}<extra></extra>",
     ))
     fig.add_annotation(
         x=x_min - pad, y=offset + 0.05, text=data.method_label(m),
         showarrow=False, xanchor="left", font=dict(size=12),
     )
 
-fig.update_xaxes(title="log10(sigma)")
+fig.update_xaxes(title="sigma")
 fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[-0.2, n - 1 + LANE_HEIGHT + 0.3])
 fig.update_layout(
     width=int(data.DETAIL_SIZE * 1.1),
