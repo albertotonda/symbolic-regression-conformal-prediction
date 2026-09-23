@@ -142,9 +142,11 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
     y_pred_oob = learner_prop.oob_prediction_
     residuals_prop_oob = y_prop_train - y_pred_oob
+    y_log_abs_residual_oob = np.log(np.abs(residuals_prop_oob) + 1e-8)
 
     sigma_losses = {
         "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), residuals_prop_oob),
+        "mae": (dict(elementwise_loss="L1DistLoss()"), y_log_abs_residual_oob),
     }
 
     for loss_name in config.loss_functions:
