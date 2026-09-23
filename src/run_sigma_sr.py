@@ -162,6 +162,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
             nested_constraints=config.sr_params.nested_constraints,
             extra_sympy_mappings=SIGMA_SR_EXTRA_SYMPY_MAPPINGS,
             verbosity=1,
+            input_stream="devnull", # disable input reading for tmux
             random_state=random_seed,
             output_directory=task_folder,
             run_id="checkpoints",
