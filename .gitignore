@@ -9,6 +9,7 @@ __marimo__
 /src/__marimo__
 /src/experiments/__marimo__
 /src/experiments/layouts
+/layouts
 /.claude
 *.ipynb
 /results*
