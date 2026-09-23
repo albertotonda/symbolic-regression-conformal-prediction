@@ -16,15 +16,7 @@ pages = {
         st.Page("home.py", title="Home", default=True),
     ],
     "Method Comparison": [
-        st.Page("pages/1_Pareto_Width_vs_Coverage.py", title="Pareto: Width vs Coverage"),
-        st.Page("pages/2_Sigma_Relationships.py", title="Sigma Relationships"),
-        st.Page("pages/3_Width_by_Residual_Rank.py", title="Width by Residual Rank"),
-        st.Page("pages/4_Difficulty_Heatmap.py", title="Difficulty Heatmap"),
-        st.Page("pages/5_Sigma_Ridgeline.py", title="Sigma Ridgeline"),
-        st.Page("pages/7_Dataset_Characteristics.py", title="Dataset Characteristics"),
-        st.Page("pages/8_Method_Head_to_Head.py", title="Method Head-to-Head"),
-        st.Page("pages/10_Confidence_Intervals.py", title="Confidence Intervals"),
-        st.Page("pages/11_Sigma_vs_Coverage.py", title="Sigma vs Coverage"),
+        st.Page("pages/method_comparison.py", title="Method Comparison"),
     ],
     "Hall of Fame": [
         st.Page("pages/6_Hall_of_Fame_Tradeoff.py", title="Hall of Fame"),
