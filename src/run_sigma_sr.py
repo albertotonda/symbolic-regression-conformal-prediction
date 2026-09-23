@@ -24,7 +24,6 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from utils.utils import setup_results_folder, fit_with_early_stopping, read_tensorboard_scalar, redirect_output_to_file
-from utils.plotting import plot_loss_curve
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
@@ -182,16 +181,6 @@ def run_single_task(dataset, task_folder, config, random_seed):
             sigma_predictor.fit(X_train_sr, y_train_sr)
 
         steps, losses = read_tensorboard_scalar(tb_log_dir, "search/data/summaries/min_loss")
-        plot_loss_curve(steps, losses, loss_name, os.path.join(task_folder, f"loss_curve_{loss_name}.png"))
-        # Also save the raw (step, loss) series as a small CSV: the
-        # TensorBoard log itself is far more expensive to read back later
-        # (it logs many other tags -- per-complexity equation losses, full
-        # equation-string tensors, population-complexity histograms -- that
-        # TensorBoard's EventAccumulator fully parses on Reload() regardless
-        # of which single tag is wanted, ~100+MB/several seconds per
-        # dataset). The dashboard's Training Dynamics page reads this CSV
-        # instead, falling back to the slow path only for older runs that
-        # don't have it.
         pd.DataFrame({"step": steps, "loss": losses}).to_csv(
             os.path.join(task_folder, f"loss_curve_{loss_name}.csv"), index=False
         )
