@@ -18,12 +18,15 @@ for consistent method labels/colors.
 ```
 
 Opens at http://localhost:8501. `app.py` is a thin entry point: it sets
-page config once and declares the grouped sidebar navigation
-(`st.navigation`/`st.Page`), then hands off to whichever page is selected.
-`home.py` is the landing page (pick a results run, see the method
-leaderboard: Pareto-non-dominance counts across the run's datasets).
+page config once and declares the sidebar navigation
+(`st.navigation`/`st.Page`, a flat list of pages -- no section headers,
+since each page below is itself already a many-tab section, so a
+one-page-per-header group would just be an extra empty layer), then hands
+off to whichever page is selected. `home.py` is the landing page (pick a
+results run, see the method leaderboard: Pareto-non-dominance counts
+across the run's datasets).
 
-Sidebar sections, each one page with several tabs:
+Sidebar pages, each with several tabs:
 - **Method Comparison** (`pages/method_comparison.py`) — a single **Dataset**
   selector above the tabs drives every per-dataset tab; Pareto's Grid view,
   Difficulty Heatmap, and Dataset Characteristics always show every dataset
@@ -69,7 +72,7 @@ existing page script, following `method_comparison.py`'s or
 per plot.
 
 For a genuinely new section, add a new `dashboard/pages/<name>.py` script
-and add it to the `pages` dict in `app.py` (there's no automatic
+and add it to the `pages` list in `app.py` (there's no automatic
 `pages/`-folder discovery — `app.py` calling `st.navigation` takes over
 sidebar rendering entirely, so an un-listed script would never appear).
 
