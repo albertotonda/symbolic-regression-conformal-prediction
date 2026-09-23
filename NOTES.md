@@ -10,6 +10,31 @@
 
 ## Chronological notes
 
+### 2026-09-23
+Corrected a wrong assumption made mid-analysis while diagnosing why sigma
+vs. `|residual|` looks non-monotonic even after binning (see the same-day
+`method_comparison.py` change below): data augmentation with the 4
+pre-computed sigma columns (`knn_dist`/`knn_std`/`knn_res`/`var`) has been
+**off** since 2026-09-14 — SR trains purely on raw base features now, so
+"SR mostly recovers/recalibrates one of the 4 existing sigma columns"
+(2026-08-21/08-31 entries, also in Claude memory `sigma-sr-theory`/
+`sigma-sr-findings`) describes the augmented-input regime, not the current
+one. Any resemblance between the SR sigma's shape and a baseline sigma's
+shape now has to come from both discovering similar structure independently
+from raw features, not from SR literally having that column as an input to
+select/rescale.
+
+Also changed `dashboard/pages/method_comparison.py`'s "Sigma Relationships"
+tab from an unbinned per-point scatter to the same equal-count-bins/median
+pattern already used by "Width by Residual Rank" and the Difficulty Heatmap
+(`N_BINS = 15`, bin on the target — `abs_residual` or `width_<method>` —
+median sigma per bin, one line per method's own subplot). Confirms the
+non-monotonicity/non-linearity in the sigma-vs-residual relationship is not
+just unbinned-scatter noise: `var` in particular stays flat (or dips)
+through low/mid residual bins and only rises sharply in the top 1-2 bins,
+and `knn_dist` even trends down at the top bin on some datasets
+(`airfoil_self_noise`, `concrete_compressive_strength`).
+
 ### 2026-09-14 (uncommitted as of this note)
 Extended the Hall-of-Fame diagnostics from 2026-09-11 and made a first pass
 at testing whether SR can find difficulty structure without leaning on the

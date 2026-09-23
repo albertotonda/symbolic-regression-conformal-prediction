@@ -3,11 +3,13 @@
 Hall of Fame's one-page/many-tabs layout instead of one page per view).
 
 A single **Dataset** selector above the tabs drives every per-dataset tab
-(Sigma Relationships, Width by Residual Rank, Sigma Ridgeline, Method
-Head-to-Head, Confidence Intervals, Sigma vs Coverage, and Pareto's Detail
-view) -- pick it once instead of on each tab separately. Pareto's Grid view,
-Difficulty Heatmap, and Dataset Characteristics are inherently cross-dataset
-(every dataset at once) and ignore it.
+(Sigma Relationships, Width by Residual, Sigma Ridgeline, Method
+Head-to-Head, Confidence Intervals, Residuals vs Coverage, and Pareto's
+Detail view) -- pick it once instead of on each tab separately. Pareto's
+Grid view, Difficulty Heatmap, and Dataset Characteristics are inherently
+cross-dataset (every dataset at once) and ignore it. Target-variable/
+prediction/residual distributions for one dataset live on their own
+"Dataset Analysis" page instead of a tab here.
 
 Streamlit tabs can't nest, so Pareto's and Difficulty Heatmap's own
 Grid-vs-Detail split (previously a second level of `st.tabs`) is a radio
@@ -54,8 +56,8 @@ dataset = st.selectbox(
     options=all_datasets,
     key="mc_dataset",
     help=(
-        "Used by every per-dataset tab (Sigma Relationships, Width by Residual "
-        "Rank, Sigma Ridgeline, Method Head-to-Head, Confidence Intervals, Sigma "
+        "Used by every per-dataset tab (Sigma Relationships, Width by Residual, "
+        "Sigma Ridgeline, Method Head-to-Head, Confidence Intervals, Residuals "
         "vs Coverage, and Pareto's Detail view). Pareto's Grid view, Difficulty "
         "Heatmap, and Dataset Characteristics always show every dataset "
         "regardless of this."
@@ -66,9 +68,9 @@ dataset = st.selectbox(
     tab_pareto, tab_sigma_rel, tab_width_rank, tab_heatmap, tab_ridgeline,
     tab_characteristics, tab_head_to_head, tab_ci, tab_sigma_cov,
 ) = st.tabs([
-    "Pareto", "Sigma Relationships", "Width by Residual Rank", "Difficulty Heatmap",
+    "Pareto", "Sigma Relationships", "Width by Residual", "Difficulty Heatmap",
     "Sigma Ridgeline", "Dataset Characteristics", "Method Head-to-Head",
-    "Confidence Intervals", "Sigma vs Coverage",
+    "Confidence Intervals", "Residuals vs Coverage",
 ])
 
 # ---------------------------------------------------------------------------
@@ -158,10 +160,13 @@ with tab_pareto:
     _render_pareto()
 
 # ---------------------------------------------------------------------------
-# Sigma vs. residuals/width, unbinned, one subplot per method.
+# Sigma vs. residuals/width: raw per-point scatter plus the binned
+# (equal-count bins on the target, median sigma per bin) trend on top,
+# one subplot per method.
 # ---------------------------------------------------------------------------
 with tab_sigma_rel:
     def _render_sigma_relationships():
+        N_BINS = 15
         datasets_with_test = [ds for ds in all_datasets if data.has_per_point_data(run_path, ds)]
         datasets_with_cal = [ds for ds in all_datasets if data.has_calibration_per_point_data(run_path, ds)]
 
@@ -205,15 +210,47 @@ with tab_sigma_rel:
 
         for i, m in enumerate(methods):
             row, col = i // cols + 1, i % cols + 1
-            log_target = np.log10(df[target_col_by_method[m]].clip(lower=1e-12))
+            target_vals = df[target_col_by_method[m]].clip(lower=1e-12).to_numpy()
+            sigma_vals = df[f"sigma_{m}"].to_numpy()
+            log_target = np.log10(target_vals)
+
             fig.add_trace(
                 go.Scattergl(
-                    x=log_target, y=df[f"sigma_{m}"], mode="markers",
-                    marker=dict(size=5, color=data.method_color(m), opacity=0.55),
+                    x=log_target, y=sigma_vals, mode="markers",
+                    marker=dict(size=4, color=data.method_color(m), opacity=0.22),
                     showlegend=False,
                     hovertemplate=(
                         f"<b>{data.method_label(m)}</b><br>"
                         f"log10({target_label})=" + "%{x:.3f}<br>sigma=%{y:.4g}<extra></extra>"
+                    ),
+                ),
+                row=row, col=col,
+            )
+
+            bins = np.array_split(np.argsort(target_vals), N_BINS)
+            bin_log_target = [np.log10(np.median(target_vals[b])) for b in bins]
+            bin_sigma = [np.median(sigma_vals[b]) for b in bins]
+            # white halo drawn under the trend line so it stays legible on top
+            # of a dense scatter regardless of how many points overlap it.
+            fig.add_trace(
+                go.Scatter(
+                    x=bin_log_target, y=bin_sigma, mode="lines",
+                    line=dict(color="white", width=6),
+                    opacity=0.85,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=row, col=col,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=bin_log_target, y=bin_sigma, mode="lines+markers",
+                    line=dict(color=data.method_color(m), width=3.5),
+                    marker=dict(size=9, color=data.method_color(m), line=dict(color="white", width=1.5)),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{data.method_label(m)}</b> (binned)<br>"
+                        f"log10(median {target_label})=" + "%{x:.3f}<br>median sigma=%{y:.4g}<extra></extra>"
                     ),
                 ),
                 row=row, col=col,
@@ -232,11 +269,12 @@ with tab_sigma_rel:
     _render_sigma_relationships()
 
 # ---------------------------------------------------------------------------
-# Interval width vs. residual rank, one line per method.
+# Interval width vs. absolute residual: raw per-point scatter (high
+# transparency, to show the data distribution) plus the sliding-window
+# median trend on top, one subplot per method.
 # ---------------------------------------------------------------------------
 with tab_width_rank:
     def _render_width_by_rank():
-        N_BINS = 15
         if not data.has_per_point_data(run_path, dataset):
             st.info(
                 f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
@@ -248,38 +286,79 @@ with tab_width_rank:
         df = data.load_per_point(run_path, dataset)
         all_methods = data.per_point_methods(df)
 
-        methods = st.multiselect(
-            "Methods", options=all_methods, default=all_methods,
-            format_func=data.method_label,
-            key="width_by_rank_methods",
-        )
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            methods = st.multiselect(
+                "Methods", options=all_methods, default=all_methods,
+                format_func=data.method_label,
+                key="width_by_rank_methods",
+            )
+        with col2:
+            window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
+                                    key="width_by_rank_window")
         if not methods:
             st.warning("Select at least one method.")
             return
 
-        abs_residual = df["abs_residual"].to_numpy()
-        bins = np.array_split(np.argsort(abs_residual), N_BINS)
-        bin_indices = np.arange(len(bins))
+        n = len(df)
+        window = max(3, round(n * window_pct / 100))
 
-        fig = go.Figure()
-        for m in methods:
-            widths = df[f"width_{m}"].to_numpy()
-            bin_medians = [np.median(widths[b]) for b in bins]
-            fig.add_trace(go.Scatter(
-                x=bin_indices, y=bin_medians, mode="lines+markers",
-                line=dict(color=data.method_color(m), width=2.5),
-                marker=dict(size=7),
-                name=data.method_label(m),
-                hovertemplate=f"<b>{data.method_label(m)}</b><br>bin=%{{x}}<br>median width=%{{y:.3f}}<extra></extra>",
-            ))
+        order = df["abs_residual"].to_numpy().argsort()
+        abs_residual_sorted = df["abs_residual"].to_numpy()[order]
 
-        fig.update_xaxes(title="Absolute residual bin (equal count per bin, increasing order)",
-                          tickmode="array", tickvals=bin_indices)
-        fig.update_yaxes(title="Median interval width")
+        cols = min(4, len(methods))
+        rows = math.ceil(len(methods) / cols)
+        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[data.method_label(m) for m in methods])
+
+        for i, m in enumerate(methods):
+            row, col = i // cols + 1, i % cols + 1
+            widths_sorted = df[f"width_{m}"].to_numpy()[order]
+
+            fig.add_trace(
+                go.Scattergl(
+                    x=abs_residual_sorted, y=widths_sorted, mode="markers",
+                    marker=dict(size=4, color=data.method_color(m), opacity=0.22),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{data.method_label(m)}</b><br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>"
+                    ),
+                ),
+                row=row, col=col,
+            )
+
+            smoothed = pd.Series(widths_sorted).rolling(window=window, center=True, min_periods=1).median().to_numpy()
+            # white halo drawn under the trend line so it stays legible on
+            # top of a dense scatter, same treatment as the Sigma
+            # Relationships tab.
+            fig.add_trace(
+                go.Scatter(
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
+                    line=dict(color="white", width=6),
+                    opacity=0.85,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=row, col=col,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
+                    line=dict(color=data.method_color(m), width=3.5),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{data.method_label(m)}</b> (windowed median)<br>abs residual=%{{x:.4g}}<br>"
+                        "width=%{y:.3f}<extra></extra>"
+                    ),
+                ),
+                row=row, col=col,
+            )
+            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
+            fig.update_yaxes(title="Interval width", row=row, col=col)
+
         fig.update_layout(
-            width=data.DETAIL_SIZE * 1.1, height=data.DETAIL_SIZE * 0.7,
-            title=f'"{dataset}"',
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
+            margin=dict(t=60),
+            title=f'"{dataset}" — window = {window} of {n} points ({window_pct}%)',
         )
         st.plotly_chart(fig, width="content")
 
@@ -732,11 +811,14 @@ with tab_ci:
     _render_confidence_intervals()
 
 # ---------------------------------------------------------------------------
-# Sigma vs. coverage: sliding-window empirical coverage, one method's own
-# sorted sigma at a time.
+# Residuals vs. coverage: sliding-window empirical coverage over the shared
+# sorted abs_residual ordering (same for every method, since it's the base
+# regressor's own residual, not a method-specific score -- unlike the old
+# per-method sigma ordering, this is never constant, so every method can be
+# shown).
 # ---------------------------------------------------------------------------
 with tab_sigma_cov:
-    def _render_sigma_vs_coverage():
+    def _render_residual_vs_coverage():
         if not data.has_per_point_data(run_path, dataset):
             st.info(
                 f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
@@ -746,21 +828,7 @@ with tab_sigma_cov:
             return
 
         df = data.load_per_point(run_path, dataset)
-        methods_all = data.per_point_methods(df)
-
-        # a constant sigma (e.g. standard_cp/mondrian_cp) has no ordering to
-        # slide a window over -- same reason Sigma Ridgeline excludes them.
-        all_methods = [m for m in methods_all if df[f"sigma_{m}"].nunique() > 1]
-        constant_methods = [m for m in methods_all if m not in all_methods]
-
-        if not all_methods:
-            st.info("No method has a non-constant difficulty score for this dataset.")
-            return
-        if constant_methods:
-            st.caption(
-                "Not shown (constant sigma, no ordering to slide a window over): "
-                + ", ".join(data.method_label(m) for m in constant_methods)
-            )
+        all_methods = data.per_point_methods(df)
 
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -780,31 +848,32 @@ with tab_sigma_cov:
         n = len(df)
         window = max(3, round(n * window_pct / 100))
 
+        order = df["abs_residual"].to_numpy().argsort()
+        abs_residual_sorted = df["abs_residual"].to_numpy()[order]
+
         cols = min(4, len(methods))
         rows = math.ceil(len(methods) / cols)
         fig = make_subplots(rows=rows, cols=cols, subplot_titles=[data.method_label(m) for m in methods])
 
         for i, m in enumerate(methods):
             row, col = i // cols + 1, i % cols + 1
-            order = df[f"sigma_{m}"].to_numpy().argsort()
-            sigma_sorted = df[f"sigma_{m}"].to_numpy()[order]
             covered_sorted = df[f"covered_{m}"].to_numpy()[order].astype(float)
             smoothed = pd.Series(covered_sorted).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
 
             fig.add_trace(
                 go.Scatter(
-                    x=sigma_sorted, y=smoothed, mode="lines",
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
                     line=dict(color=data.method_color(m), width=2.5),
                     showlegend=False,
                     hovertemplate=(
-                        f"<b>{data.method_label(m)}</b><br>sigma=%{{x:.4g}}<br>"
+                        f"<b>{data.method_label(m)}</b><br>abs residual=%{{x:.4g}}<br>"
                         "coverage (windowed)=%{y:.3f}<extra></extra>"
                     ),
                 ),
                 row=row, col=col,
             )
             fig.add_hline(y=target_coverage, line_dash="dash", line_color="gray", opacity=0.5, row=row, col=col)
-            fig.update_xaxes(title="sigma", row=row, col=col)
+            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
             fig.update_yaxes(title="Coverage (windowed)", range=[0, 1.05], row=row, col=col)
 
         fig.update_layout(
@@ -814,4 +883,4 @@ with tab_sigma_cov:
         )
         st.plotly_chart(fig, width="content")
 
-    _render_sigma_vs_coverage()
+    _render_residual_vs_coverage()

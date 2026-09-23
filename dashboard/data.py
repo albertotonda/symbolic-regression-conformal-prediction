@@ -147,6 +147,22 @@ def load_testing_data(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     return pd.read_csv(path, index_col="index")
 
 
+def has_calibration_data(run_path: str, dataset_name: str) -> bool:
+    return (Path(run_path) / dataset_name / "calibration_data.csv").exists()
+
+
+@st.cache_data
+def load_calibration_data(run_path: str, dataset_name: str) -> pd.DataFrame | None:
+    """Raw calibration-set (y, y_pred, residuals) -- the calibration-side
+    counterpart of `load_testing_data`. Lighter than
+    `load_per_point_calibration`: no sigma columns required, just the file
+    itself, since this doesn't need any method's difficulty score."""
+    path = Path(run_path) / dataset_name / "calibration_data.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path, index_col="index")
+
+
 @st.cache_data
 def load_intervals(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     """Long-format (method, index, lower_bound, upper_bound) for every
@@ -349,6 +365,36 @@ def load_dataset_characteristics() -> pd.DataFrame:
         if col.startswith("R2_") or col.startswith("MSE_"):
             df[col] = df[col].astype(str).str.split(" +/- ", regex=False).str[0].astype(float)
     return df
+
+
+@st.cache_data(show_spinner="Fetching dataset description from OpenML…")
+def load_dataset_description(dataset_name: str) -> dict | None:
+    """The dataset's own OpenML description text, fetched live via the
+    OpenML API: `task_id` looked up from the same CTR23 metadata table as
+    `load_dataset_characteristics`, then `openml.tasks.get_task(task_id)
+    .get_dataset()` -- the same task_id -> dataset path used by
+    `src/utils/data.py`'s `load_and_preprocess_openml_task`. Cached across
+    reruns since it's a network call; returns None if the dataset isn't in
+    the CTR23 table or the API call fails (offline, dataset removed, etc.)
+    so callers can show a clear fallback instead of crashing the page.
+    """
+    characteristics = load_dataset_characteristics()
+    match = characteristics.loc[characteristics["dataset_name"] == dataset_name, "task_id"]
+    if match.empty:
+        return None
+    task_id = int(match.iloc[0])
+
+    import openml
+    try:
+        openml_dataset = openml.tasks.get_task(task_id).get_dataset()
+    except Exception:
+        return None
+
+    return {
+        "description": openml_dataset.description,
+        "dataset_id": openml_dataset.dataset_id,
+        "citation": getattr(openml_dataset, "citation", None),
+    }
 
 
 def compute_pareto_dominance(df: pd.DataFrame, methods: list[str]) -> pd.DataFrame:

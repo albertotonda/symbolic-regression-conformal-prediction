@@ -1,20 +1,26 @@
 # -*- coding: utf-8 -*-
 """Hall-of-Fame analysis: everything the SR search's final complexity/loss
-Pareto front looked like for one dataset/loss, across four tabs --
+Pareto front looked like for one dataset/loss, across five tabs --
 
 - Trade-off: every equation scattered by (coverage, interval width),
   colored by complexity, chosen one highlighted -- does the chosen
   equation actually sit at a good point of the trade-off?
 - Sigma vs Outcome: each equation's own per-point sigma against residual or
-  width, unbinned, one subplot per equation (own axis, not shared -- see
-  4_Difficulty_Heatmap.py's docstring for why a shared axis across
-  different sigma estimators would misalign) -- does a more complex
-  equation's difficulty estimate actually track the outcome tighter, or is
-  it noise?
-- Sigma vs Coverage: same per-equation small multiples, but a
-  sliding-window empirical coverage curve over each equation's own sorted
-  sigma (coverage is 0/1, too noisy raw; a window avoids picking arbitrary
-  bin edges) -- does added complexity buy real conditional calibration?
+  width -- raw scatter plus a binned (equal-count bins on the target,
+  median sigma per bin) trend line on top, one subplot per equation (own
+  axis, not shared -- see 4_Difficulty_Heatmap.py's docstring for why a
+  shared axis across different sigma estimators would misalign) -- does a
+  more complex equation's difficulty estimate actually track the outcome
+  tighter, or is it noise?
+- Width vs Residuals: sliding-window median interval width over the shared
+  sorted abs_residual ordering, one subplot per equation -- does a more
+  complex equation actually shrink intervals where the base regressor is
+  easy, without losing coverage where it's hard?
+- Residuals vs Coverage: same per-equation small multiples, but a
+  sliding-window empirical coverage curve over the shared sorted
+  abs_residual ordering (coverage is 0/1, too noisy raw; a window avoids
+  picking arbitrary bin edges) -- does added complexity buy real
+  conditional calibration?
 - Complexity x Decile: coverage/width heatmap, rows = complexity, columns
   = residual-rank decile (shared across every equation, so columns are
   directly comparable row to row) -- where along the complexity path does
@@ -36,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import data  # noqa: E402
 
 N_DECILES = 10
+N_BINS = 15
 COVERAGE_COLORSCALE = [
     [0.0, "#2b6bab"],
     [0.5, "#ffffff"],
@@ -88,8 +95,8 @@ def panel_title(c):
     return f"C{c} ★" if c == chosen_complexity else f"C{c}"
 
 
-tab_tradeoff, tab_outcome, tab_coverage, tab_heatmap = st.tabs(
-    ["Trade-off", "Sigma vs Outcome", "Sigma vs Coverage", "Complexity x Decile"]
+tab_tradeoff, tab_outcome, tab_width_resid, tab_coverage, tab_heatmap = st.tabs(
+    ["Trade-off", "Sigma vs Outcome", "Width vs Residuals", "Residuals vs Coverage", "Complexity x Decile"]
 )
 
 with tab_tradeoff:
@@ -169,13 +176,45 @@ with tab_outcome:
         for i, c in enumerate(complexities):
             row, col = i // cols + 1, i % cols + 1
             col_name = "abs_residual" if target == "Residual" else f"width_{c}"
-            log_target = np.log10(df_pp[col_name].clip(lower=1e-12))
+            target_vals = df_pp[col_name].clip(lower=1e-12).to_numpy()
+            sigma_vals = df_pp[f"sigma_{c}"].to_numpy()
+            log_target = np.log10(target_vals)
             fig.add_trace(
                 go.Scattergl(
-                    x=log_target, y=df_pp[f"sigma_{c}"], mode="markers",
-                    marker=dict(size=5, color=complexity_color(c), opacity=0.55),
+                    x=log_target, y=sigma_vals, mode="markers",
+                    marker=dict(size=4, color=complexity_color(c), opacity=0.22),
                     showlegend=False,
                     hovertemplate=f"C{c}<br>log10({target_label})=%{{x:.3f}}<br>sigma=%{{y:.4g}}<extra></extra>",
+                ),
+                row=row, col=col,
+            )
+
+            bins = np.array_split(np.argsort(target_vals), N_BINS)
+            bin_log_target = [np.log10(np.median(target_vals[b])) for b in bins]
+            bin_sigma = [np.median(sigma_vals[b]) for b in bins]
+            # white halo drawn under the trend line so it stays legible on
+            # top of a dense scatter, same treatment as method_comparison.py's
+            # Sigma Relationships tab.
+            fig.add_trace(
+                go.Scatter(
+                    x=bin_log_target, y=bin_sigma, mode="lines",
+                    line=dict(color="white", width=6),
+                    opacity=0.85,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=row, col=col,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=bin_log_target, y=bin_sigma, mode="lines+markers",
+                    line=dict(color=complexity_color(c), width=3.5),
+                    marker=dict(size=9, color=complexity_color(c), line=dict(color="white", width=1.5)),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"C{c} (binned)<br>log10(median {target_label})="
+                        + "%{x:.3f}<br>median sigma=%{y:.4g}<extra></extra>"
+                    ),
                 ),
                 row=row, col=col,
             )
@@ -188,6 +227,68 @@ with tab_outcome:
         )
         st.plotly_chart(fig, width="content")
 
+with tab_width_resid:
+    if not has_per_point:
+        st.info(no_data_message)
+    else:
+        window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
+                                key="hof_width_window")
+        n = len(df_pp)
+        window = max(3, round(n * window_pct / 100))
+
+        order = df_pp["abs_residual"].to_numpy().argsort()
+        abs_residual_sorted = df_pp["abs_residual"].to_numpy()[order]
+
+        cols = min(4, len(complexities))
+        rows = math.ceil(len(complexities) / cols)
+        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[panel_title(c) for c in complexities])
+        for i, c in enumerate(complexities):
+            row, col = i // cols + 1, i % cols + 1
+            widths_sorted = df_pp[f"width_{c}"].to_numpy()[order]
+
+            fig.add_trace(
+                go.Scattergl(
+                    x=abs_residual_sorted, y=widths_sorted, mode="markers",
+                    marker=dict(size=4, color=complexity_color(c), opacity=0.22),
+                    showlegend=False,
+                    hovertemplate=f"C{c}<br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>",
+                ),
+                row=row, col=col,
+            )
+
+            smoothed = pd.Series(widths_sorted).rolling(window=window, center=True, min_periods=1).median().to_numpy()
+            # white halo drawn under the trend line so it stays legible on
+            # top of a dense scatter, same treatment as the other tabs.
+            fig.add_trace(
+                go.Scatter(
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
+                    line=dict(color="white", width=6),
+                    opacity=0.85,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=row, col=col,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
+                    line=dict(color=complexity_color(c), width=3.5),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"C{c} (windowed median)<br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>"
+                    ),
+                ),
+                row=row, col=col,
+            )
+            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
+            fig.update_yaxes(title="Interval width", row=row, col=col)
+        fig.update_layout(
+            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
+            margin=dict(t=60),
+            title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations, window = {window} of {n} points ({window_pct}%)',
+        )
+        st.plotly_chart(fig, width="content")
+
 with tab_coverage:
     if not has_per_point:
         st.info(no_data_message)
@@ -197,26 +298,27 @@ with tab_coverage:
         n = len(df_pp)
         window = max(3, round(n * window_pct / 100))
 
+        order = df_pp["abs_residual"].to_numpy().argsort()
+        abs_residual_sorted = df_pp["abs_residual"].to_numpy()[order]
+
         cols = min(4, len(complexities))
         rows = math.ceil(len(complexities) / cols)
         fig = make_subplots(rows=rows, cols=cols, subplot_titles=[panel_title(c) for c in complexities])
         for i, c in enumerate(complexities):
             row, col = i // cols + 1, i % cols + 1
-            order = df_pp[f"sigma_{c}"].to_numpy().argsort()
-            sigma_sorted = df_pp[f"sigma_{c}"].to_numpy()[order]
             covered_sorted = df_pp[f"covered_{c}"].to_numpy()[order].astype(float)
             smoothed = pd.Series(covered_sorted).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
             fig.add_trace(
                 go.Scatter(
-                    x=sigma_sorted, y=smoothed, mode="lines",
+                    x=abs_residual_sorted, y=smoothed, mode="lines",
                     line=dict(color=complexity_color(c), width=2.5),
                     showlegend=False,
-                    hovertemplate=f"C{c}<br>sigma=%{{x:.4g}}<br>coverage (windowed)=%{{y:.3f}}<extra></extra>",
+                    hovertemplate=f"C{c}<br>abs residual=%{{x:.4g}}<br>coverage (windowed)=%{{y:.3f}}<extra></extra>",
                 ),
                 row=row, col=col,
             )
             fig.add_hline(y=target_coverage, line_dash="dash", line_color="gray", opacity=0.5, row=row, col=col)
-            fig.update_xaxes(title="sigma", row=row, col=col)
+            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
             fig.update_yaxes(title="Coverage (windowed)", range=[0, 1.05], row=row, col=col)
         fig.update_layout(
             width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
