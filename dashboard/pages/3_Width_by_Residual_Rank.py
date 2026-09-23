@@ -16,7 +16,6 @@ import data  # noqa: E402
 
 N_BINS = 15
 
-st.set_page_config(page_title="Width by Residual Rank", layout="wide")
 st.title("Interval width by residual rank")
 
 run_path = st.session_state.get("run_path")

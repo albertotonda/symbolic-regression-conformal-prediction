@@ -18,7 +18,6 @@ import data  # noqa: E402
 
 CELL_SIZE, LEGEND_MARGIN, DETAIL_SIZE = data.CELL_SIZE, data.LEGEND_MARGIN, data.DETAIL_SIZE
 
-st.set_page_config(page_title="Pareto: Width vs Coverage", layout="wide")
 st.title("Pareto: median CI width vs. coverage")
 
 run_path = st.session_state.get("run_path")

@@ -29,7 +29,6 @@ def _hex_to_rgba(hex_color, alpha):
     return f"rgba({r},{g},{b},{alpha})"
 
 
-st.set_page_config(page_title="Sigma Ridgeline", layout="wide")
 st.title("Sigma distributions (ridgeline)")
 
 run_path = st.session_state.get("run_path")

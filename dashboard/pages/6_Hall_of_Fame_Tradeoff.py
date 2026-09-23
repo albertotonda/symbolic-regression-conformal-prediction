@@ -42,7 +42,6 @@ COVERAGE_COLORSCALE = [
     [1.0, "#ab4b2b"],
 ]
 
-st.set_page_config(page_title="Hall of Fame", layout="wide")
 st.title("Hall-of-Fame equations")
 
 run_path = st.session_state.get("run_path")

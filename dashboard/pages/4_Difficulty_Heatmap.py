@@ -44,7 +44,6 @@ COVERAGE_COLORSCALE = [
     [1.0, "#ab4b2b"],
 ]
 
-st.set_page_config(page_title="Difficulty Heatmap", layout="wide")
 st.title("Coverage / width by residual-rank decile")
 
 run_path = st.session_state.get("run_path")

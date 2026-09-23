@@ -28,7 +28,6 @@ from plotly.subplots import make_subplots
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import data  # noqa: E402
 
-st.set_page_config(page_title="Sigma vs Coverage", layout="wide")
 st.title("Sigma vs. coverage (sliding window)")
 
 run_path = st.session_state.get("run_path")
