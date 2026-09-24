@@ -92,6 +92,8 @@ and dropped: both condition on the outcome.
   intervals (q95 = 2.0x half-width) and too wide for its widest (0.67x);
   knn_res stays within 0.75-1.5x; knn_dist is badly mis-sized
   (4.6x to 0.05x).
+- Right-sizing (own-sigma x-axis) later removed from the Interval Width
+  tab too; it now shows width vs. y_pred only.
 - `run_sigma_sr.py` now saves `testing_features.csv`;
   `src/analysis/backfill_testing_features.py` rebuilt it for
   `results-sigma-sr-full` (all 35 datasets matched the saved y_test).

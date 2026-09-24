@@ -12,10 +12,8 @@ Pareto front looked like for one dataset/loss, across five tabs --
   shared axis across different sigma estimators would misalign) -- does a
   more complex equation's difficulty estimate actually track the outcome
   tighter, or is it noise?
-- Interval Width: per-equation small multiples, width vs. y_pred or
-  right-sizing (|residual| quantile vs. half-width, grouped by the
-  equation's own width); see interval_width_view.py -- where does each
-  equation spend its width, and is it the right size?
+- Interval Width: per-equation small multiples, width vs. y_pred; see
+  interval_width_view.py -- where does each equation spend its width?
 - Conditional Coverage: same per-equation small multiples, sliding-window
   empirical coverage along a selectable x-axis (y_pred or own sigma),
   then mean width vs. worst-group coverage per equation (y_pred bins,
@@ -239,7 +237,6 @@ with tab_width_resid:
             width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
             label=panel_title, color=complexity_color,
             testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
-            target_coverage=target_coverage,
             title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
             key_prefix="hof_width",
         )

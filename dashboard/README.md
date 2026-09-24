@@ -35,11 +35,8 @@ Sidebar pages, each with several tabs:
     (single dataset, via the shared selector) radio
   - Sigma Relationships — sigma vs. residual (calibration or test) or width
     (test only), unbinned, one subplot per method
-  - Interval Width — one subplot per method, x-axis y_pred (per-point
-    width plus a sliding-window median: where each method spends its
-    width) or own sigma (right-sizing: points grouped by their own width,
-    95% quantile of |residual| vs. median half-width; on the diagonal,
-    intervals are exactly as wide as their errors)
+  - Interval Width — one subplot per method, per-point width vs. y_pred
+    plus a sliding-window median: where each method spends its width
   - Difficulty Heatmap — coverage/width by residual-rank decile; Grid (all
     methods) or Detail (single method) radio; binned on residual rank
     rather than each method's own sigma rank, so columns are directly

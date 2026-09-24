@@ -268,9 +268,8 @@ with tab_sigma_rel:
     _render_sigma_relationships()
 
 # ---------------------------------------------------------------------------
-# Interval width: width vs. y_pred, or right-sizing (|residual| quantile vs.
-# half-width, grouped by each method's own width); one subplot per method,
-# see interval_width_view.py.
+# Interval width vs. y_pred, one subplot per method; see
+# interval_width_view.py.
 # ---------------------------------------------------------------------------
 with tab_width_rank:
     def _render_interval_width():
@@ -298,7 +297,6 @@ with tab_width_rank:
             width_by_key={m: df[f"width_{m}"].to_numpy() for m in methods},
             label=data.method_label, color=data.method_color,
             testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
-            target_coverage=target_coverage,
             title=f'"{dataset}"',
             key_prefix="mc_width",
         )

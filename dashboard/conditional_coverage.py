@@ -138,27 +138,3 @@ def worst_bin(order_values, covered, min_fraction=0.2, seed=0):
     worst = int(np.argmin(_bin_cov(search)))
     heldout = _bin_cov(~search)[worst]
     return float(heldout) if np.isfinite(heldout) else float("nan"), worst, n_bins
-
-
-def right_sizing_bins(width, abs_residual, level, n_bins=15):
-    """Per-bin (median half-width, `level` quantile of |residual|, bin
-    size), grouping points by their own interval width. Few distinct
-    widths (e.g. Mondrian categories, or a constant width) are grouped by
-    value; otherwise into `n_bins` equal-count bins. A well-sized method
-    has quantile ~= half-width in every bin."""
-    width = np.asarray(width, dtype=float)
-    abs_residual = np.asarray(abs_residual, dtype=float)
-    # widths come from upper - lower, so equal widths differ by float noise;
-    # compare them rounded to 6 significant digits relative to the median
-    scale = np.median(np.abs(width)) or 1.0
-    rounded = np.round(width / scale, 6)
-    unique = np.unique(rounded)
-    if unique.size <= n_bins:
-        groups = [np.flatnonzero(rounded == w) for w in unique]
-    else:
-        groups = np.array_split(np.argsort(width, kind="stable"), n_bins)
-    return (
-        np.array([np.median(width[g]) / 2 for g in groups]),
-        np.array([np.quantile(abs_residual[g], level) for g in groups]),
-        np.array([len(g) for g in groups]),
-    )
