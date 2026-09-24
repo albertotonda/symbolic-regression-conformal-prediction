@@ -324,8 +324,8 @@ def run_all_tasks(config, random_seed):
 
     for dataset in iter_datasets(config):
 
-        # TODO: Remove for all datasets
-        if dataset.name != "forest_fires":
+        # optional subset of datasets by name; empty or missing runs all
+        if config.get("datasets") and dataset.name not in config.datasets:
             continue
         print(dataset)
 
