@@ -147,6 +147,22 @@ def load_testing_data(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     return pd.read_csv(path, index_col="index")
 
 
+def has_testing_features(run_path: str, dataset_name: str) -> bool:
+    return (Path(run_path) / dataset_name / "testing_features.csv").exists()
+
+
+@st.cache_data
+def load_testing_features(run_path: str, dataset_name: str) -> pd.DataFrame | None:
+    """Normalized test-set features (one column per feature), in the same
+    0-based row order as `testing_data.csv`. Written by
+    src/run_sigma_sr.py, or backfilled for older runs by
+    src/analysis/backfill_testing_features.py."""
+    path = Path(run_path) / dataset_name / "testing_features.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path, index_col="index")
+
+
 def has_calibration_data(run_path: str, dataset_name: str) -> bool:
     return (Path(run_path) / dataset_name / "calibration_data.csv").exists()
 

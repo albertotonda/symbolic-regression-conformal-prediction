@@ -12,14 +12,15 @@ Pareto front looked like for one dataset/loss, across five tabs --
   shared axis across different sigma estimators would misalign) -- does a
   more complex equation's difficulty estimate actually track the outcome
   tighter, or is it noise?
-- Width vs Residuals: sliding-window median interval width over the shared
-  sorted abs_residual ordering, one subplot per equation -- does a more
-  complex equation actually shrink intervals where the base regressor is
-  easy, without losing coverage where it's hard?
-- Residuals vs Coverage: same per-equation small multiples, but a
-  sliding-window empirical coverage curve over the shared sorted
-  abs_residual ordering (coverage is 0/1, too noisy raw; a window avoids
-  picking arbitrary bin edges) -- does added complexity buy real
+- Interval Width: per-equation small multiples, width vs. y_pred or
+  right-sizing (|residual| quantile vs. half-width, grouped by the
+  equation's own width); see interval_width_view.py -- where does each
+  equation spend its width, and is it the right size?
+- Conditional Coverage: same per-equation small multiples, sliding-window
+  empirical coverage along a selectable x-axis (y_pred or own sigma),
+  then mean width vs. worst-group coverage per equation (y_pred bins,
+  own-sigma bins, or worst slab); see
+  conditional_coverage_view.py -- does added complexity buy real
   conditional calibration?
 - Complexity x Decile: coverage/width heatmap, rows = complexity, columns
   = residual-rank decile (shared across every equation, so columns are
@@ -39,6 +40,8 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import conditional_coverage_view  # noqa: E402
+import interval_width_view  # noqa: E402
 import data  # noqa: E402
 
 N_DECILES = 10
@@ -96,7 +99,7 @@ def panel_title(c):
 
 
 tab_tradeoff, tab_outcome, tab_width_resid, tab_coverage, tab_heatmap = st.tabs(
-    ["Trade-off", "Sigma vs Outcome", "Width vs Residuals", "Residuals vs Coverage", "Complexity x Decile"]
+    ["Trade-off", "Sigma vs Outcome", "Interval Width", "Conditional Coverage", "Complexity x Decile"]
 )
 
 with tab_tradeoff:
@@ -231,101 +234,34 @@ with tab_width_resid:
     if not has_per_point:
         st.info(no_data_message)
     else:
-        window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
-                                key="hof_width_window")
-        n = len(df_pp)
-        window = max(3, round(n * window_pct / 100))
-
-        order = df_pp["abs_residual"].to_numpy().argsort()
-        abs_residual_sorted = df_pp["abs_residual"].to_numpy()[order]
-
-        cols = min(4, len(complexities))
-        rows = math.ceil(len(complexities) / cols)
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[panel_title(c) for c in complexities])
-        for i, c in enumerate(complexities):
-            row, col = i // cols + 1, i % cols + 1
-            widths_sorted = df_pp[f"width_{c}"].to_numpy()[order]
-
-            fig.add_trace(
-                go.Scattergl(
-                    x=abs_residual_sorted, y=widths_sorted, mode="markers",
-                    marker=dict(size=4, color=complexity_color(c), opacity=0.22),
-                    showlegend=False,
-                    hovertemplate=f"C{c}<br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>",
-                ),
-                row=row, col=col,
-            )
-
-            smoothed = pd.Series(widths_sorted).rolling(window=window, center=True, min_periods=1).median().to_numpy()
-            # white halo drawn under the trend line so it stays legible on
-            # top of a dense scatter, same treatment as the other tabs.
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color="white", width=6),
-                    opacity=0.85,
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row, col=col,
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color=complexity_color(c), width=3.5),
-                    showlegend=False,
-                    hovertemplate=(
-                        f"C{c} (windowed median)<br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>"
-                    ),
-                ),
-                row=row, col=col,
-            )
-            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
-            fig.update_yaxes(title="Interval width", row=row, col=col)
-        fig.update_layout(
-            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
-            margin=dict(t=60),
-            title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations, window = {window} of {n} points ({window_pct}%)',
+        interval_width_view.render(
+            keys=complexities,
+            width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
+            label=panel_title, color=complexity_color,
+            testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
+            target_coverage=target_coverage,
+            title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
+            key_prefix="hof_width",
         )
-        st.plotly_chart(fig, width="content")
 
 with tab_coverage:
     if not has_per_point:
         st.info(no_data_message)
     else:
-        window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
-                                key="hof_coverage_window")
-        n = len(df_pp)
-        window = max(3, round(n * window_pct / 100))
-
-        order = df_pp["abs_residual"].to_numpy().argsort()
-        abs_residual_sorted = df_pp["abs_residual"].to_numpy()[order]
-
-        cols = min(4, len(complexities))
-        rows = math.ceil(len(complexities) / cols)
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[panel_title(c) for c in complexities])
-        for i, c in enumerate(complexities):
-            row, col = i // cols + 1, i % cols + 1
-            covered_sorted = df_pp[f"covered_{c}"].to_numpy()[order].astype(float)
-            smoothed = pd.Series(covered_sorted).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color=complexity_color(c), width=2.5),
-                    showlegend=False,
-                    hovertemplate=f"C{c}<br>abs residual=%{{x:.4g}}<br>coverage (windowed)=%{{y:.3f}}<extra></extra>",
-                ),
-                row=row, col=col,
-            )
-            fig.add_hline(y=target_coverage, line_dash="dash", line_color="gray", opacity=0.5, row=row, col=col)
-            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
-            fig.update_yaxes(title="Coverage (windowed)", range=[0, 1.05], row=row, col=col)
-        fig.update_layout(
-            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
-            margin=dict(t=60),
-            title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations, window = {window} of {n} points ({window_pct}%)',
+        features = data.load_testing_features(run_path, dataset)
+        conditional_coverage_view.render(
+            keys=complexities,
+            covered_by_key={c: df_pp[f"covered_{c}"].to_numpy() for c in complexities},
+            sigma_by_key={c: df_pp[f"sigma_{c}"].to_numpy() for c in complexities},
+            width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
+            label=panel_title, color=complexity_color,
+            testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
+            features=None if features is None else features.reset_index(drop=True),
+            target_coverage=target_coverage,
+            title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
+            key_prefix="hof_cond_cov",
+            highlight=chosen_complexity,
         )
-        st.plotly_chart(fig, width="content")
 
 with tab_heatmap:
     if not has_per_point:
