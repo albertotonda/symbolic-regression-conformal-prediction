@@ -3,11 +3,11 @@
 Hall of Fame's one-page/many-tabs layout instead of one page per view).
 
 A single **Dataset** selector above the tabs drives every per-dataset tab
-(Sigma Relationships, Width by Residual, Sigma Ridgeline, Method
-Head-to-Head, Confidence Intervals, Residuals vs Coverage, and Pareto's
-Detail view) -- pick it once instead of on each tab separately. Pareto's
-Grid view, Difficulty Heatmap, and Dataset Characteristics are inherently
-cross-dataset (every dataset at once) and ignore it. Target-variable/
+(Sigma Relationships, Interval Width, Confidence Intervals, Conditional
+Coverage, and Pareto's Detail view) -- pick it once instead of on each tab
+separately. Pareto's Grid view, Difficulty Heatmap, and Dataset
+Characteristics are inherently cross-dataset (every dataset at once) and
+ignore it. Target-variable/
 prediction/residual distributions for one dataset live on their own
 "Dataset Analysis" page instead of a tab here.
 
@@ -31,9 +31,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
-from scipy.stats import gaussian_kde
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import conditional_coverage_view  # noqa: E402
+import interval_width_view  # noqa: E402
 import data  # noqa: E402
 
 st.title("Method comparison")
@@ -56,21 +57,19 @@ dataset = st.selectbox(
     options=all_datasets,
     key="mc_dataset",
     help=(
-        "Used by every per-dataset tab (Sigma Relationships, Width by Residual, "
-        "Sigma Ridgeline, Method Head-to-Head, Confidence Intervals, Residuals "
-        "vs Coverage, and Pareto's Detail view). Pareto's Grid view, Difficulty "
+        "Used by every per-dataset tab (Sigma Relationships, Interval Width, "
+        "Confidence Intervals, Conditional Coverage, and Pareto's Detail view). Pareto's Grid view, Difficulty "
         "Heatmap, and Dataset Characteristics always show every dataset "
         "regardless of this."
     ),
 )
 
 (
-    tab_pareto, tab_sigma_rel, tab_width_rank, tab_heatmap, tab_ridgeline,
-    tab_characteristics, tab_head_to_head, tab_ci, tab_sigma_cov,
+    tab_pareto, tab_sigma_rel, tab_width_rank, tab_heatmap,
+    tab_characteristics, tab_ci, tab_sigma_cov,
 ) = st.tabs([
-    "Pareto", "Sigma Relationships", "Width by Residual", "Difficulty Heatmap",
-    "Sigma Ridgeline", "Dataset Characteristics", "Method Head-to-Head",
-    "Confidence Intervals", "Residuals vs Coverage",
+    "Pareto", "Sigma Relationships", "Interval Width", "Difficulty Heatmap",
+    "Dataset Characteristics", "Confidence Intervals", "Conditional Coverage",
 ])
 
 # ---------------------------------------------------------------------------
@@ -269,100 +268,42 @@ with tab_sigma_rel:
     _render_sigma_relationships()
 
 # ---------------------------------------------------------------------------
-# Interval width vs. absolute residual: raw per-point scatter (high
-# transparency, to show the data distribution) plus the sliding-window
-# median trend on top, one subplot per method.
+# Interval width: width vs. y_pred, or right-sizing (|residual| quantile vs.
+# half-width, grouped by each method's own width); one subplot per method,
+# see interval_width_view.py.
 # ---------------------------------------------------------------------------
 with tab_width_rank:
-    def _render_width_by_rank():
-        if not data.has_per_point_data(run_path, dataset):
+    def _render_interval_width():
+        if not data.has_interval_detail_data(run_path, dataset) or not data.has_per_point_data(run_path, dataset):
             st.info(
-                f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
-                "`testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv` (or the older "
-                "`per_point.csv`). Pick a different dataset above, or a newer run."
+                f'No per-point data for "{dataset}" — this view needs `testing_data.csv`, '
+                "`methods_sigmas_test.csv` and `methods_intervals.csv`. Pick a different dataset "
+                "above, or a newer run."
             )
             return
 
         df = data.load_per_point(run_path, dataset)
         all_methods = data.per_point_methods(df)
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            methods = st.multiselect(
-                "Methods", options=all_methods, default=all_methods,
-                format_func=data.method_label,
-                key="width_by_rank_methods",
-            )
-        with col2:
-            window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
-                                    key="width_by_rank_window")
+        methods = st.multiselect(
+            "Methods", options=all_methods, default=all_methods,
+            format_func=data.method_label,
+            key="width_by_rank_methods",
+        )
         if not methods:
             st.warning("Select at least one method.")
             return
 
-        n = len(df)
-        window = max(3, round(n * window_pct / 100))
-
-        order = df["abs_residual"].to_numpy().argsort()
-        abs_residual_sorted = df["abs_residual"].to_numpy()[order]
-
-        cols = min(4, len(methods))
-        rows = math.ceil(len(methods) / cols)
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[data.method_label(m) for m in methods])
-
-        for i, m in enumerate(methods):
-            row, col = i // cols + 1, i % cols + 1
-            widths_sorted = df[f"width_{m}"].to_numpy()[order]
-
-            fig.add_trace(
-                go.Scattergl(
-                    x=abs_residual_sorted, y=widths_sorted, mode="markers",
-                    marker=dict(size=4, color=data.method_color(m), opacity=0.22),
-                    showlegend=False,
-                    hovertemplate=(
-                        f"<b>{data.method_label(m)}</b><br>abs residual=%{{x:.4g}}<br>width=%{{y:.3f}}<extra></extra>"
-                    ),
-                ),
-                row=row, col=col,
-            )
-
-            smoothed = pd.Series(widths_sorted).rolling(window=window, center=True, min_periods=1).median().to_numpy()
-            # white halo drawn under the trend line so it stays legible on
-            # top of a dense scatter, same treatment as the Sigma
-            # Relationships tab.
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color="white", width=6),
-                    opacity=0.85,
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row, col=col,
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color=data.method_color(m), width=3.5),
-                    showlegend=False,
-                    hovertemplate=(
-                        f"<b>{data.method_label(m)}</b> (windowed median)<br>abs residual=%{{x:.4g}}<br>"
-                        "width=%{y:.3f}<extra></extra>"
-                    ),
-                ),
-                row=row, col=col,
-            )
-            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
-            fig.update_yaxes(title="Interval width", row=row, col=col)
-
-        fig.update_layout(
-            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
-            margin=dict(t=60),
-            title=f'"{dataset}" — window = {window} of {n} points ({window_pct}%)',
+        interval_width_view.render(
+            keys=methods,
+            width_by_key={m: df[f"width_{m}"].to_numpy() for m in methods},
+            label=data.method_label, color=data.method_color,
+            testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
+            target_coverage=target_coverage,
+            title=f'"{dataset}"',
+            key_prefix="mc_width",
         )
-        st.plotly_chart(fig, width="content")
 
-    _render_width_by_rank()
+    _render_interval_width()
 
 # ---------------------------------------------------------------------------
 # Heatmap: rows = datasets, columns = residual-rank deciles.
@@ -507,99 +448,6 @@ with tab_heatmap:
     _render_heatmap()
 
 # ---------------------------------------------------------------------------
-# Ridgeline plot of each method's sigma distribution, for one dataset.
-# ---------------------------------------------------------------------------
-with tab_ridgeline:
-    def _render_ridgeline():
-        LANE_HEIGHT = 0.85
-        N_GRID = 300
-
-        def _hex_to_rgba(hex_color, alpha):
-            hex_color = hex_color.lstrip("#")
-            r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
-            return f"rgba({r},{g},{b},{alpha})"
-
-        if not data.has_per_point_data(run_path, dataset):
-            st.info(
-                f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
-                "`testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv` (or the older "
-                "`per_point.csv`). Pick a different dataset above, or a newer run."
-            )
-            return
-
-        df = data.load_per_point(run_path, dataset)
-        methods_all = data.per_point_methods(df)
-
-        # a constant sigma (e.g. standard_cp/mondrian_cp) has no distribution to
-        # draw, and gaussian_kde raises on zero-variance input.
-        all_methods = [m for m in methods_all if df[f"sigma_{m}"].nunique() > 1]
-        constant_methods = [m for m in methods_all if m not in all_methods]
-
-        if not all_methods:
-            st.info("No method has a non-constant difficulty score for this dataset.")
-            return
-        if constant_methods:
-            st.caption(
-                "Not shown (constant sigma, no distribution to draw): "
-                + ", ".join(data.method_label(m) for m in constant_methods)
-            )
-
-        methods = st.multiselect(
-            "Methods", options=all_methods, default=all_methods,
-            format_func=data.method_label,
-            key="ridgeline_methods",
-        )
-        if not methods:
-            st.warning("Select at least one method.")
-            return
-
-        ordered_methods = [m for m in all_methods if m in methods]
-        n = len(ordered_methods)
-
-        sigmas = {m: df[f"sigma_{m}"].to_numpy() for m in ordered_methods}
-        x_min = min(v.min() for v in sigmas.values())
-        x_max = max(v.max() for v in sigmas.values())
-        pad = 0.05 * (x_max - x_min or 1.0)
-        x_grid = np.linspace(x_min - pad, x_max + pad, N_GRID)
-
-        fig = go.Figure()
-        for i, m in enumerate(ordered_methods):
-            offset = n - 1 - i
-            kde = gaussian_kde(sigmas[m])
-            density = kde(x_grid)
-            peak = density.max()
-            scaled = (density / peak * LANE_HEIGHT) if peak > 0 else density
-
-            fig.add_trace(go.Scatter(
-                x=x_grid, y=np.full(N_GRID, offset), mode="lines",
-                line=dict(width=0), showlegend=False, hoverinfo="skip",
-            ))
-            fig.add_trace(go.Scatter(
-                x=x_grid, y=offset + scaled, mode="lines", fill="tonexty",
-                line=dict(width=1.5, color=data.method_color(m)),
-                fillcolor=_hex_to_rgba(data.method_color(m), 0.6),
-                showlegend=False,
-                hovertemplate=f"<b>{data.method_label(m)}</b><br>sigma=%{{x:.3g}}<extra></extra>",
-            ))
-            fig.add_annotation(
-                x=x_min - pad, y=offset + 0.05, text=data.method_label(m),
-                showarrow=False, xanchor="left", font=dict(size=12),
-            )
-
-        fig.update_xaxes(title="sigma")
-        fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False,
-                          range=[-0.2, n - 1 + LANE_HEIGHT + 0.3])
-        fig.update_layout(
-            width=int(data.DETAIL_SIZE * 1.1),
-            height=max(int(data.DETAIL_SIZE * 0.6), 90 * n + 150),
-            title=f'"{dataset}"',
-            plot_bgcolor="white",
-        )
-        st.plotly_chart(fig, width="content")
-
-    _render_ridgeline()
-
-# ---------------------------------------------------------------------------
 # Dataset characteristics vs. method performance (always cross-dataset).
 # ---------------------------------------------------------------------------
 with tab_characteristics:
@@ -677,77 +525,6 @@ with tab_characteristics:
     _render_characteristics()
 
 # ---------------------------------------------------------------------------
-# Method head-to-head: per-point interval width, two methods.
-# ---------------------------------------------------------------------------
-with tab_head_to_head:
-    def _render_head_to_head():
-        if not data.has_per_point_data(run_path, dataset):
-            st.info(
-                f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
-                "`testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv` (or the older "
-                "`per_point.csv`). Pick a different dataset above, or a newer run."
-            )
-            return
-
-        df = data.load_per_point(run_path, dataset)
-        all_methods = data.per_point_methods(df)
-        if len(all_methods) < 2:
-            st.warning("Need at least two methods with per-point data.")
-            return
-
-        col1, col2 = st.columns(2)
-        with col1:
-            default_a = next((m for m in all_methods if m.startswith("sr_")), all_methods[0])
-            method_a = st.selectbox("Method A", options=all_methods, index=all_methods.index(default_a),
-                                     format_func=data.method_label, key="h2h_method_a")
-        with col2:
-            remaining = [m for m in all_methods if m != method_a]
-            default_b = "standard_cp" if "standard_cp" in remaining else remaining[0]
-            method_b = st.selectbox("Method B", options=remaining, index=remaining.index(default_b),
-                                     format_func=data.method_label, key="h2h_method_b")
-
-        width_a = df[f"width_{method_a}"]
-        width_b = df[f"width_{method_b}"]
-        lo = min(width_a.min(), width_b.min())
-        hi = max(width_a.max(), width_b.max())
-
-        fig = go.Figure()
-        fig.add_trace(go.Scattergl(
-            x=width_b, y=width_a, mode="markers",
-            marker=dict(
-                size=6, color=df["abs_residual"], colorscale="Viridis", opacity=0.75,
-                colorbar=dict(title="|residual|"),
-            ),
-            hovertemplate=(
-                f"{data.method_label(method_b)}" + "=%{x:.3f}<br>"
-                f"{data.method_label(method_a)}" + "=%{y:.3f}<br>"
-                "|residual|=%{marker.color:.3f}<extra></extra>"
-            ),
-        ))
-        fig.add_trace(go.Scatter(
-            x=[lo, hi], y=[lo, hi], mode="lines",
-            line=dict(color="gray", dash="dash", width=1.5),
-            showlegend=False, hoverinfo="skip",
-        ))
-
-        fig.update_xaxes(title=f"{data.method_label(method_b)} — interval width", type="log")
-        fig.update_yaxes(title=f"{data.method_label(method_a)} — interval width", type="log")
-        fig.update_layout(
-            width=data.DETAIL_SIZE, height=data.DETAIL_SIZE,
-            title=f'"{dataset}"',
-        )
-        st.plotly_chart(fig, width="content")
-
-        narrower_a = (width_a < width_b).mean()
-        st.caption(
-            f"{data.method_label(method_a)} is narrower on {narrower_a:.1%} of test points "
-            f"(points below the diagonal); {data.method_label(method_b)} is narrower on "
-            f"{1 - narrower_a:.1%}."
-        )
-
-    _render_head_to_head()
-
-# ---------------------------------------------------------------------------
 # Confidence interval sanity check: actual/predicted/interval, one method.
 # ---------------------------------------------------------------------------
 with tab_ci:
@@ -811,76 +588,46 @@ with tab_ci:
     _render_confidence_intervals()
 
 # ---------------------------------------------------------------------------
-# Residuals vs. coverage: sliding-window empirical coverage over the shared
-# sorted abs_residual ordering (same for every method, since it's the base
-# regressor's own residual, not a method-specific score -- unlike the old
-# per-method sigma ordering, this is never constant, so every method can be
-# shown).
+# Conditional coverage: sliding-window coverage along a selectable x-axis
+# (y_pred, own sigma, or the worst-slab projection), one
+# subplot per method, then mean width vs. worst-group coverage; see
+# conditional_coverage_view.py.
 # ---------------------------------------------------------------------------
 with tab_sigma_cov:
-    def _render_residual_vs_coverage():
-        if not data.has_per_point_data(run_path, dataset):
+    def _render_conditional_coverage():
+        if not data.has_interval_detail_data(run_path, dataset) or not data.has_per_point_data(run_path, dataset):
             st.info(
-                f'No per-point data for "{dataset}" — it predates `src/run_sigma_sr.py` writing '
-                "`testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv` (or the older "
-                "`per_point.csv`). Pick a different dataset above, or a newer run."
+                f'No per-point data for "{dataset}" — this view needs `testing_data.csv`, '
+                "`methods_sigmas_test.csv` and `methods_intervals.csv`. Pick a different dataset "
+                "above, or a newer run."
             )
             return
 
         df = data.load_per_point(run_path, dataset)
+        testing = data.load_testing_data(run_path, dataset).reset_index(drop=True)
+        features = data.load_testing_features(run_path, dataset)
         all_methods = data.per_point_methods(df)
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            methods = st.multiselect(
-                "Methods", options=all_methods, default=all_methods,
-                format_func=data.method_label,
-                key="sigma_cov_methods",
-            )
-        with col2:
-            window_pct = st.slider("Window size (% of points)", min_value=5, max_value=50, value=10, step=5,
-                                    key="sigma_cov_window")
-
+        methods = st.multiselect(
+            "Methods", options=all_methods, default=all_methods,
+            format_func=data.method_label,
+            key="sigma_cov_methods",
+        )
         if not methods:
             st.warning("Select at least one method.")
             return
 
-        n = len(df)
-        window = max(3, round(n * window_pct / 100))
-
-        order = df["abs_residual"].to_numpy().argsort()
-        abs_residual_sorted = df["abs_residual"].to_numpy()[order]
-
-        cols = min(4, len(methods))
-        rows = math.ceil(len(methods) / cols)
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=[data.method_label(m) for m in methods])
-
-        for i, m in enumerate(methods):
-            row, col = i // cols + 1, i % cols + 1
-            covered_sorted = df[f"covered_{m}"].to_numpy()[order].astype(float)
-            smoothed = pd.Series(covered_sorted).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
-
-            fig.add_trace(
-                go.Scatter(
-                    x=abs_residual_sorted, y=smoothed, mode="lines",
-                    line=dict(color=data.method_color(m), width=2.5),
-                    showlegend=False,
-                    hovertemplate=(
-                        f"<b>{data.method_label(m)}</b><br>abs residual=%{{x:.4g}}<br>"
-                        "coverage (windowed)=%{y:.3f}<extra></extra>"
-                    ),
-                ),
-                row=row, col=col,
-            )
-            fig.add_hline(y=target_coverage, line_dash="dash", line_color="gray", opacity=0.5, row=row, col=col)
-            fig.update_xaxes(title="Absolute residual", type="log", row=row, col=col)
-            fig.update_yaxes(title="Coverage (windowed)", range=[0, 1.05], row=row, col=col)
-
-        fig.update_layout(
-            width=cols * data.CELL_SIZE, height=rows * data.CELL_SIZE + 60,
-            margin=dict(t=60),
-            title=f'"{dataset}" — window = {window} of {n} points ({window_pct}%)',
+        conditional_coverage_view.render(
+            keys=methods,
+            covered_by_key={m: df[f"covered_{m}"].to_numpy() for m in methods},
+            sigma_by_key={m: df[f"sigma_{m}"].to_numpy() for m in methods},
+            width_by_key={m: df[f"width_{m}"].to_numpy() for m in methods},
+            label=data.method_label, color=data.method_color,
+            testing=testing,
+            features=None if features is None else features.reset_index(drop=True),
+            target_coverage=target_coverage,
+            title=f'"{dataset}"',
+            key_prefix="mc_cond_cov",
         )
-        st.plotly_chart(fig, width="content")
 
-    _render_residual_vs_coverage()
+    _render_conditional_coverage()

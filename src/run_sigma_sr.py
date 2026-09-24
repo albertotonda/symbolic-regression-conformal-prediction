@@ -281,6 +281,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
     df_testing = pd.DataFrame.from_dict(testing_data)
     df_calibration.to_csv(os.path.join(task_folder, "calibration_data.csv"), index_label="index")
     df_testing.to_csv(os.path.join(task_folder, "testing_data.csv"), index_label="index")
+    # normalized test features, for feature-space diagnostics (worst-slab coverage)
+    pd.DataFrame(X_test, columns=dataset.df_X.columns).to_csv(
+        os.path.join(task_folder, "testing_features.csv"), index_label="index"
+    )
 
     ci_means, ci_medians, coverages = {}, {}, {}
     for method in conf_intervals.keys():

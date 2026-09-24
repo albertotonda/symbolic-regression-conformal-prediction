@@ -10,6 +10,57 @@
 
 ## Chronological notes
 
+### 2026-09-24
+Added a Conditional Coverage tab to the dashboard (Method Comparison and
+Hall of Fame; replaces "Residuals vs Coverage"): one sliding-window
+coverage plot with a selectable x-axis -- y_pred, own sigma, or the
+worst-slab projection of the test features. |residual| and y were tried
+and dropped: both condition on the outcome.
+
+- Why: coverage binned by |residual| is descriptive only. A point is
+  uncovered exactly when |r|/sigma > q, so the top residual bins are
+  under-covered for any method, even an oracle sigma, and a random sigma
+  also flattens that curve. Conditional coverage should be checked on
+  groups defined before seeing y: y_pred bins, feature slabs.
+- Worst-slab coverage (Cauchois et al., 2021): 1000 random directions,
+  slabs of at least 20% (adjustable) of points, searched on one half of
+  the test set and measured on the other half. Per-method mode is the
+  fair metric (each method gets the same adversarial search); shared mode
+  evaluates every method inside the reference method's worst slab, which
+  by construction makes the reference look worst there.
+- Also in the tab: an "Own sigma" x-axis (coverage along each method's
+  own sigma quantile, the self-consistency check), and a mean width vs.
+  worst-group coverage chart (one point per method/equation; groups =
+  worst slab, y_pred bins or own-sigma bins, each at least 20% of points,
+  worst group picked on one half and measured on the other). y and
+  |residual| aren't offered as groups: they condition on the outcome.
+  On small datasets (e.g. forest_fires, 130 test points) held-out groups
+  have ~13 points, so these numbers are noise; the tab warns below 100.
+- Later the same day: the worst-slab projection was dropped as a plot
+  x-axis (a random mix of features has no physical meaning); only the
+  worst-slab coverage number remains, in the width vs. worst-group chart.
+  The shared-direction mode went with it. Sigma Ridgeline and Method
+  Head-to-Head tabs removed.
+- "Width by Residual" became an Interval Width tab (Method Comparison and
+  Hall of Fame): width vs. y_pred (where each method spends width), or
+  right-sizing -- points grouped by their own width, 95% quantile of
+  |residual| vs. median half-width, diagonal = right-sized. Binning width
+  by |residual| was dropped: a noisy |r| flattens the trend. On
+  superconductivity, right-sizing shows SR too narrow for its narrowest
+  intervals (q95 = 2.0x half-width) and too wide for its widest (0.67x);
+  knn_res stays within 0.75-1.5x; knn_dist is badly mis-sized
+  (4.6x to 0.05x).
+- `run_sigma_sr.py` now saves `testing_features.csv`;
+  `src/analysis/backfill_testing_features.py` rebuilt it for
+  `results-sigma-sr-full` (all 35 datasets matched the saved y_test).
+- First look, per-method WSC: superconductivity -- knn_res 0.946, SR
+  0.881, standard 0.884, knn_dist 0.816; wave_energy -- mondrian 0.939,
+  SR 0.921, knn_dist 0.868.
+- Open issue noticed while reviewing losses: `bin_crossfit` calibrates
+  each of its 4 sigma bins with its own quantile inside the loss, but the
+  deployed SR-CP uses one global quantile (`compute_normalized_intervals`).
+  Training and deployment don't match.
+
 ### 2026-09-23
 Corrected a wrong assumption made mid-analysis while diagnosing why sigma
 vs. `|residual|` looks non-monotonic even after binning (see the same-day

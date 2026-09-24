@@ -35,23 +35,29 @@ Sidebar pages, each with several tabs:
     (single dataset, via the shared selector) radio
   - Sigma Relationships — sigma vs. residual (calibration or test) or width
     (test only), unbinned, one subplot per method
-  - Width by Residual Rank
+  - Interval Width — one subplot per method, x-axis y_pred (per-point
+    width plus a sliding-window median: where each method spends its
+    width) or own sigma (right-sizing: points grouped by their own width,
+    95% quantile of |residual| vs. median half-width; on the diagonal,
+    intervals are exactly as wide as their errors)
   - Difficulty Heatmap — coverage/width by residual-rank decile; Grid (all
     methods) or Detail (single method) radio; binned on residual rank
     rather than each method's own sigma rank, so columns are directly
     comparable method-to-method
-  - Sigma Ridgeline
   - Dataset Characteristics — method width ratio vs. dataset size/features/R2
-  - Method Head-to-Head — per-point width comparison between two methods
   - Confidence Intervals — sanity-check view of actual/predicted/interval
     band for a handful of test points
-  - Sigma vs Coverage — sliding-window empirical coverage over each
-    method's own sorted sigma, one subplot per method
+  - Conditional Coverage — sliding-window empirical coverage, one subplot
+    per method, along y_pred or own sigma quantile, each with the question
+    it answers. Below it, mean width vs. worst-group coverage, one point
+    per method, with groups from worst slab, y_pred bins or own-sigma bins.
+    Worst slab needs `testing_features.csv` (see below)
 - **Hall of Fame** (`pages/6_Hall_of_Fame_Tradeoff.py`) — one dataset/loss's
-  SR equations at a time, four tabs: Trade-off (coverage vs. width, colored
+  SR equations at a time, five tabs: Trade-off (coverage vs. width, colored
   by complexity), Sigma vs Outcome (each equation's own sigma vs.
-  residual/width, unbinned), Sigma vs Coverage (sliding-window coverage per
-  equation), Complexity x Decile (heatmap, rows = complexity, columns =
+  residual/width, unbinned), Interval Width and Conditional Coverage (same
+  views as Method Comparison's, one subplot per equation), Complexity x
+  Decile (heatmap, rows = complexity, columns =
   residual-rank decile)
 - **Training** (`pages/9_Training_Dynamics.py`) — Training Dynamics: SR
   loss-vs-iteration curves (from a precomputed `loss_curve_<loss>.csv`,
@@ -83,3 +89,19 @@ the sidebar/tab label via `st.Page(..., title=...)` instead. Inside a tab
 function, use `return` for an early exit ("no data for this"), never
 `st.stop()` — `st.stop()` halts the *entire* script, which would blank out
 every tab after it since all tabs run in one script pass.
+
+## Worst-slab coverage
+
+`conditional_coverage.py` implements worst-slab coverage (Cauchois et al.,
+2021): search 1000 random directions in feature space for the slab holding
+at least a given fraction of test points with the lowest coverage, on half
+of the test set, and report its coverage on the other half. It needs the
+normalized test features, saved by `src/run_sigma_sr.py` as
+`testing_features.csv`. For runs made before that, rebuild them from the
+same seeded OpenML split:
+
+```
+.venv/bin/python src/analysis/backfill_testing_features.py results-sigma-sr-full
+```
+
+Tests: `uv run --no-project --with pytest --with pandas --with numpy pytest dashboard/tests`
