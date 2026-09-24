@@ -37,7 +37,17 @@ def penalize_smaller_loss_julia(confidence):
     """ % confidence
 
 
-def bin_crossfit_loss_julia(confidence, lambda_cov):
+def bin_crossfit_loss_julia(confidence, lambda_cov, seed=0):
+    """Julia loss for the sigma-SR search: scores the normalized conformal
+    predictor that gets deployed (intervals q * sigma(x), one global q), with
+    2-fold cross-fitting so q is never calibrated on the points it scores.
+
+    loss = mean half-width + lambda_cov * sum over 4 sigma-rank bins of
+           (bin coverage - target coverage)^2
+
+    The fold split is a fixed permutation (sorted hashes of (index, seed)),
+    so every candidate equation is scored on the same split.
+    """
     return """
     function eval_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
         # tree predicts log(sigma); dataset.y holds the raw OOB residual
@@ -56,79 +66,74 @@ def bin_crossfit_loss_julia(confidence, lambda_cov):
             return L(Inf)
         end
 
-        target_coverage = L(%.2f)
+        target_coverage = L(%.4f)
         alpha = one(L) - target_coverage
         n_bins = 4
 
         delta = abs.(dataset.y) ./ sigma
 
+        # bins by sigma rank, only used to measure conditional coverage
         sigma_rank = sortperm(sigma)
         bin_id = Vector{Int}(undef, n)
         for (rank, idx) in enumerate(sigma_rank)
             bin_id[idx] = clamp(ceil(Int, rank * n_bins / n), 1, n_bins)
         end
 
-        fold_perm = sortperm(rand(n))
+        fold_perm = sortperm([hash((i, %d)) for i in 1:n])
         half = n ÷ 2
         fold_A = fold_perm[1:half]
         fold_B = fold_perm[half+1:end]
 
         function fold_pass(cal_idx, eval_idx)
+            # one global conformal quantile from the calibration fold,
+            # same finite-sample rank as crepes: ceil((1 - alpha)(m + 1))
+            cal_scores = sort(delta[cal_idx])
+            m = length(cal_scores)
+            q_pos = clamp(ceil(Int, (one(L) - alpha) * (m + 1)), 1, m)
+            q_hat = L(cal_scores[q_pos])
+
             width_sum = zero(L)
-            width_count = 0
             cov_sum = zeros(L, n_bins)
             cov_count = zeros(Int, n_bins)
-            for b in 1:n_bins
-                cal_in_bin = [i for i in cal_idx if bin_id[i] == b]
-                eval_in_bin = [i for i in eval_idx if bin_id[i] == b]
-                if isempty(cal_in_bin) || isempty(eval_in_bin)
-                    continue
+            for i in eval_idx
+                width_sum += q_hat * L(sigma[i])
+                b = bin_id[i]
+                if L(delta[i]) <= q_hat
+                    cov_sum[b] += one(L)
                 end
-                cal_scores = sort(delta[cal_in_bin])
-                m = length(cal_scores)
-                q_pos = clamp(ceil(Int, (one(L) - alpha) * m), 1, m)
-                q_hat = L(cal_scores[q_pos])
-
-                for i in eval_in_bin
-                    width_sum += q_hat * L(sigma[i])
-                    width_count += 1
-                    if L(delta[i]) <= q_hat
-                        cov_sum[b] += one(L)
-                    end
-                    cov_count[b] += 1
-                end
+                cov_count[b] += 1
             end
-            return width_sum, width_count, cov_sum, cov_count
+            return width_sum / length(eval_idx), cov_sum, cov_count
         end
 
-        width_sum_A, width_count_A, cov_sum_A, cov_count_A = fold_pass(fold_A, fold_B)
-        width_sum_B, width_count_B, cov_sum_B, cov_count_B = fold_pass(fold_B, fold_A)
+        width_A, cov_sum_A, cov_count_A = fold_pass(fold_A, fold_B)
+        width_B, cov_sum_B, cov_count_B = fold_pass(fold_B, fold_A)
 
-        if width_count_A == 0 || width_count_B == 0
-            return L(Inf)
-        end
+        # ell_w: mean interval half-width, averaged over both cross-fit directions
+        ell_w = (width_A + width_B) / L(2.0)
 
-        # ell_w: mean interval width, averaged over both cross-fit directions
-        ell_w = (width_sum_A / width_count_A + width_sum_B / width_count_B) / L(2.0)
-
-        # ell_cov per bin, averaged over both cross-fit directions, then
-        # penalized by its squared deviation from the target coverage
+        # per-bin coverage, pooled over both directions, penalized by its
+        # squared deviation from the target coverage
         coverage_penalty = zero(L)
-        n_valid_bins = 0
         for b in 1:n_bins
-            if cov_count_A[b] == 0 || cov_count_B[b] == 0
+            count = cov_count_A[b] + cov_count_B[b]
+            if count == 0
                 continue
             end
-            ell_cov_A = cov_sum_A[b] / cov_count_A[b]
-            ell_cov_B = cov_sum_B[b] / cov_count_B[b]
-            mean_cov = (ell_cov_A + ell_cov_B) / L(2.0)
-            coverage_penalty += (mean_cov - target_coverage)^2
-            n_valid_bins += 1
-        end
-        if n_valid_bins == 0
-            return L(Inf)
+            bin_coverage = (cov_sum_A[b] + cov_sum_B[b]) / count
+            coverage_penalty += (bin_coverage - target_coverage)^2
         end
 
-        return ell_w + L(%.2f) * coverage_penalty
+        return ell_w + L(%.4f) * coverage_penalty
     end
-    """ % (confidence, lambda_cov)
+    """ % (confidence, seed, lambda_cov)
+
+
+def pinball_loss_julia(confidence):
+    """Elementwise pinball (quantile) loss at level `confidence`, for fitting
+    log|residual|: the minimizer is the conditional `confidence` quantile of
+    log|residual|, i.e. the log of the |residual| quantile a conformal
+    interval at that level needs (quantiles commute with the monotone log).
+    """
+    tau = f"{confidence:.4f}"
+    return f"pinball(prediction, target) = max({tau} * (target - prediction), ({tau} - 1) * (target - prediction))"

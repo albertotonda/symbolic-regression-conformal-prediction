@@ -27,7 +27,7 @@ from utils.utils import setup_results_folder, fit_with_early_stopping, read_tens
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
 from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
-from utils.losses import bin_crossfit_loss_julia
+from utils.losses import bin_crossfit_loss_julia, pinball_loss_julia
 from utils.config import load_config, dump_config
 
 # Keys must match custom operator names in sr_params.unary_operators.
@@ -144,8 +144,8 @@ def run_single_task(dataset, task_folder, config, random_seed):
     y_log_abs_residual_oob = np.log(np.abs(residuals_prop_oob) + 1e-8)
 
     sigma_losses = {
-        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov)), residuals_prop_oob),
-        "mae": (dict(elementwise_loss="L1DistLoss()"), y_log_abs_residual_oob),
+        "bin_crossfit": (dict(loss_function=bin_crossfit_loss_julia(config.confidence, config.lambda_cov, seed=random_seed)), residuals_prop_oob),
+        "pinball": (dict(elementwise_loss=pinball_loss_julia(config.confidence)), y_log_abs_residual_oob),
     }
 
     for loss_name in config.loss_functions:
@@ -205,8 +205,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
                 log_sigma = np.nan_to_num(log_sigma, nan=50.0)
                 return np.exp(np.clip(log_sigma, -50.0, 50.0))
 
+            # deploy exp(equation) exactly as the loss scored it: no min-max
+            # scaling (it shifts sigma, changing its ratios) and no beta offset
             de_hof = DifficultyEstimator()
-            de_hof.fit(X_train_sr, f=sigma_f, scaler=True)
+            de_hof.fit(X_train_sr, f=sigma_f, scaler=False, beta=0)
             conf_intervals_hof[complexity], sigmas_cal_hof[complexity], sigmas_test_hof[complexity] = compute_normalized_intervals(
                 de=de_hof,
                 learner_prop=learner_prop, 
