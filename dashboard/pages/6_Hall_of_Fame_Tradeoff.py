@@ -16,8 +16,8 @@ Pareto front looked like for one dataset/loss, across five tabs --
   interval_width_view.py -- where does each equation spend its width?
 - Conditional Coverage: same per-equation small multiples, sliding-window
   empirical coverage along a selectable x-axis (y_pred or own sigma),
-  then mean width vs. worst-group coverage per equation (y_pred bins,
-  own-sigma bins, or worst slab); see
+  then mean width vs. worst-group coverage per equation (y_pred bins or
+  own-sigma bins); see
   conditional_coverage_view.py -- does added complexity buy real
   conditional calibration?
 - Complexity x Decile: coverage/width heatmap, rows = complexity, columns
@@ -246,7 +246,6 @@ with tab_coverage:
     if not has_per_point:
         st.info(no_data_message)
     else:
-        features = data.load_testing_features(run_path, dataset)
         conditional_coverage_view.render(
             keys=complexities,
             covered_by_key={c: df_pp[f"covered_{c}"].to_numpy() for c in complexities},
@@ -254,7 +253,6 @@ with tab_coverage:
             width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
             label=panel_title, color=complexity_color,
             testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
-            features=None if features is None else features.reset_index(drop=True),
             target_coverage=target_coverage,
             title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
             key_prefix="hof_cond_cov",

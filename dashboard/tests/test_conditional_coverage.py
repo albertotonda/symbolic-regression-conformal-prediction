@@ -20,39 +20,9 @@ def test_sliding_coverage_sorts_and_smooths():
     np.testing.assert_array_equal(smoothed, [0.0, 1.0, 1.0, 1.0])
 
 
-def test_random_directions_are_unit_and_reproducible():
-    a = cc.random_directions(5, 20, seed=3)
-    b = cc.random_directions(5, 20, seed=3)
-    np.testing.assert_allclose(np.linalg.norm(a, axis=1), 1.0)
-    np.testing.assert_array_equal(a, b)
-
-
 def test_split_halves_is_a_half_split():
     mask = cc.split_halves(101, seed=1)
     assert mask.sum() == 50
-
-
-def test_worst_slab_finds_planted_miscovered_region():
-    # coverage fails only where feature 0 is high; feature 1 is irrelevant
-    rng = np.random.default_rng(0)
-    X = rng.standard_normal((4000, 2))
-    covered = ~((X[:, 0] > 0.8) & (rng.random(4000) < 0.6))
-    slab = cc.worst_slabs(X, {"m": covered}, delta=0.2, n_directions=200, seed=0)["m"]
-
-    assert abs(slab.direction[0]) > 0.9  # direction aligned with feature 0
-    assert slab.heldout_coverage < 0.8  # well below marginal (~0.87)
-    assert slab.heldout_size >= 0.15 * 2000
-
-
-def test_worst_slab_is_near_marginal_for_uniform_miscoverage():
-    rng = np.random.default_rng(1)
-    X = rng.standard_normal((4000, 3))
-    covered = rng.random(4000) < 0.9
-    slab = cc.worst_slabs(X, {"m": covered}, delta=0.2, n_directions=200, seed=0)["m"]
-    # held-out coverage of a searched slab on pure noise stays near 0.9
-    assert abs(slab.heldout_coverage - 0.9) < 0.04
-    # the search half is optimistic (lower), held-out corrects it
-    assert slab.search_coverage <= slab.heldout_coverage + 0.02
 
 
 def test_worst_bin_finds_miscovered_top_bin():

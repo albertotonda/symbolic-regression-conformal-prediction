@@ -47,8 +47,7 @@ Sidebar pages, each with several tabs:
   - Conditional Coverage — sliding-window empirical coverage, one subplot
     per method, along y_pred or own sigma quantile, each with the question
     it answers. Below it, mean width vs. worst-group coverage, one point
-    per method, with groups from worst slab, y_pred bins or own-sigma bins.
-    Worst slab needs `testing_features.csv` (see below)
+    per method, with groups from y_pred bins or own-sigma bins
 - **Hall of Fame** (`pages/6_Hall_of_Fame_Tradeoff.py`) — one dataset/loss's
   SR equations at a time, five tabs: Trade-off (coverage vs. width, colored
   by complexity), Sigma vs Outcome (each equation's own sigma vs.
@@ -87,18 +86,6 @@ function, use `return` for an early exit ("no data for this"), never
 `st.stop()` — `st.stop()` halts the *entire* script, which would blank out
 every tab after it since all tabs run in one script pass.
 
-## Worst-slab coverage
-
-`conditional_coverage.py` implements worst-slab coverage (Cauchois et al.,
-2021): search 1000 random directions in feature space for the slab holding
-at least a given fraction of test points with the lowest coverage, on half
-of the test set, and report its coverage on the other half. It needs the
-normalized test features, saved by `src/run_sigma_sr.py` as
-`testing_features.csv`. For runs made before that, rebuild them from the
-same seeded OpenML split:
-
-```
-.venv/bin/python src/analysis/backfill_testing_features.py results-sigma-sr-full
-```
+## Tests
 
 Tests: `uv run --no-project --with pytest --with pandas --with numpy pytest dashboard/tests`

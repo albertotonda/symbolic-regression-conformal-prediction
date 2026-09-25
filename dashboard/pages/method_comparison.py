@@ -600,8 +600,7 @@ with tab_ci:
 
 # ---------------------------------------------------------------------------
 # Conditional coverage: sliding-window coverage along a selectable x-axis
-# (y_pred, own sigma, or the worst-slab projection), one
-# subplot per method, then mean width vs. worst-group coverage; see
+# (y_pred or own sigma), one subplot per method, then mean width vs. worst-group coverage; see
 # conditional_coverage_view.py.
 # ---------------------------------------------------------------------------
 with tab_sigma_cov:
@@ -616,7 +615,6 @@ with tab_sigma_cov:
 
         df = data.load_per_point(run_path, dataset)
         testing = data.load_testing_data(run_path, dataset).reset_index(drop=True)
-        features = data.load_testing_features(run_path, dataset)
         all_methods = data.per_point_methods(df)
 
         methods = st.multiselect(
@@ -635,7 +633,6 @@ with tab_sigma_cov:
             width_by_key={m: df[f"width_{m}"].to_numpy() for m in methods},
             label=data.method_label, color=data.method_color,
             testing=testing,
-            features=None if features is None else features.reset_index(drop=True),
             target_coverage=target_coverage,
             title=f'"{dataset}"',
             key_prefix="mc_cond_cov",
