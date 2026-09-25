@@ -21,7 +21,7 @@ if src_path not in sys.path:
 from utils.data import split_and_normalize_data
 from utils.evaluate import compute_ci_stats, log_equations, setup_results_folder
 from utils.plotting import plot_confidence_intervals, plot_pareto, plot_target_distribution
-from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size, mondrian_min_bin_size
 from utils.losses import bin_crossfit_loss_julia
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -155,7 +155,7 @@ sigmas_test["var"] = de_var.apply(X_test)
 
 # Mondrian CP using variance
 print("Computing CI for MCP...")
-min_points = int(1 / (1 - confidence) - 1) + 1
+min_points = mondrian_min_bin_size(confidence)
 bin_thresholds = find_bin_thresholds_with_min_size(sigmas_comp["var"], min_points, random_seed)
 number_of_bins = len(bin_thresholds) - 1
 print(f"Number of Mondrian bins: {number_of_bins}")

@@ -10,6 +10,21 @@
 
 ## Chronological notes
 
+### 2026-09-25
+
+- Mondrian CP audit: rebuilding `mondrian_cp` intervals from the saved
+  files of `results-sigma-sr-comparison` with a separate per-bin quantile
+  gives exactly the saved intervals and coverage (all 35 datasets).
+- Bug: `int(1/(1-0.95) - 1) + 1` gave 19, not 20 (float 1/0.05 =
+  19.999...), so bins held 19 points. Still valid, since 19 is the
+  minimum for a finite 95% quantile. Fixed with
+  `cp_methods.mondrian_min_bin_size`.
+- The bins are as small as possible (~20 points at 95%), so each bin's
+  half-width is its max |residual|: valid coverage, noisy widths. Mondrian
+  often beats `var` because it fits a free step-shaped width over sigma
+  instead of assuming width is proportional to sigma.
+- `mondrian_cp` sigmas are saved as ones; the bin ids aren't saved.
+
 ### 2026-09-24
 Added a Conditional Coverage tab to the dashboard (Method Comparison and
 Hall of Fame; replaces "Residuals vs Coverage"): one sliding-window

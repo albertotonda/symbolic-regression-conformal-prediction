@@ -45,6 +45,15 @@ def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confide
 
     return intervals, sigmas_cal, sigmas_test
 
+def mondrian_min_bin_size(confidence):
+    """
+    Minimum calibration points per Mondrian bin: a finite conformal quantile
+    needs n >= 1/(1-confidence) - 1, plus one point of safety margin. The
+    ratio is rounded before flooring since 1/(1-0.95) evaluates to
+    19.999... in float.
+    """
+    return int(np.floor(round(1 / (1 - confidence), 9)))
+
 def find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed):
     """
     crepes.extras.binning's min_size parameter requests bins=len(values)//
