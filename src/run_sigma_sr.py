@@ -26,7 +26,7 @@ if src_path not in sys.path:
 from utils.utils import setup_results_folder, fit_with_early_stopping, read_tensorboard_scalar, redirect_output_to_file
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
-from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size, mondrian_min_bin_size
 from utils.losses import bin_crossfit_loss_julia, pinball_loss_julia
 from utils.config import load_config, dump_config
 
@@ -108,15 +108,13 @@ def run_single_task(dataset, task_folder, config, random_seed):
         sigmas_train_oob["var"] = de_var_oob.apply()
 
     # Mondrian CP using variance
-    min_points = int(1 / (1-config.confidence) - 1) + 1
+    min_points = mondrian_min_bin_size(config.confidence)
     bin_thresholds = find_bin_thresholds_with_min_size(sigmas_cal["var"], min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
     print(f"Number of Mondrian bins: {number_of_bins}")
 
-    # the "mc" argument for calibrate()/predict_int() internally takes X as
-    # its only parameter; reuse the variance sigmas already computed above
-    # for X_cal and X_test instead of recomputing a full RF-variance pass
-    # over them.
+    # the "mc" argument for calibrate()/predict_int() takes X as its only
+    # parameter, so the variance sigmas are recomputed from X
     def mondrian_categories(X):
         sigmas = de_var.apply(X)
         return binning(sigmas, bins=bin_thresholds, seed=random_seed)

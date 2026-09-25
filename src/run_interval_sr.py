@@ -44,7 +44,7 @@ from utils.config import load_config, dump_config
 from utils.data import load_and_preprocess_openml_task, split_and_normalize_data
 from utils.evaluate import compute_ci_stats
 from utils.plotting import plot_confidence_intervals, plot_pareto
-from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size
+from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals, find_bin_thresholds_with_min_size, mondrian_min_bin_size
 from utils.losses import penalize_smaller_loss_julia
 
 from sklearn.ensemble import RandomForestRegressor
@@ -145,12 +145,7 @@ def compute_mondrian_intervals(learner_prop, de_var, sigmas_cal_var, X_cal, y_ca
     bin actually holds at least the minimum number of calibration points
     required for a finite conformal quantile at this confidence level.
     """
-    # minimal number of data points per bin is n >= 1/(1-confidence) - 1;
-    # +1 as a safety margin, since crepes' own check on the calibration side
-    # (base.py: int((1-confidence)*(n+1))-1 >= 0) can trip at the exact
-    # boundary count due to floating-point rounding of (1-confidence) for
-    # typical confidence levels (e.g. 1-0.9 != 0.1 exactly in binary float)
-    min_points = int(1 / (1-confidence) - 1) + 1
+    min_points = mondrian_min_bin_size(confidence)
 
     bin_thresholds = find_bin_thresholds_with_min_size(sigmas_cal_var, min_points, random_seed)
     number_of_bins = len(bin_thresholds) - 1
