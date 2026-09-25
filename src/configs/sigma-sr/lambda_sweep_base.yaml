@@ -6,7 +6,7 @@ openml_params:
     suite_id: 353
 
 results_csv_name: results.csv
-datasets: [] # dataset names to run (e.g. [forest_fires]); empty runs the whole suite
+datasets: [superconductivity, miami_housing, california_housing, abalone] # lambda_cov sweep subset
 
 predictor_model: RandomForestRegressor
 predictor_params:
@@ -19,14 +19,14 @@ data_augmentation:
     sigma_knn_res: False
     sigma_var: False
 
-loss_functions: [bin_crossfit]
+loss_functions: [bin_crossfit, pinball]
 lambda_cov : 500
 ncp_knn_k: 25
 
 sr_params:
     npopulations: 40
     population_size: 50
-    niterations: 1000
+    niterations: 100 # low for the lambda_cov sweep
     early_stop: False # set to False to run the full niterations (regular evolution, no plateau check)
     early_stop_chunk_size: 2
     early_stop_patience: 3

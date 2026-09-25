@@ -51,6 +51,7 @@ _KNOWN_METHOD_ORDER = [
     "var",
     "mondrian_cp",
     "sr_bin_crossfit",
+    "sr_pinball",
 ]
 METHOD_COLORS = dict(zip(_KNOWN_METHOD_ORDER, _CATEGORICAL_PALETTE))
 

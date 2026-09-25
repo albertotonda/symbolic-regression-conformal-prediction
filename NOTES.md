@@ -25,6 +25,48 @@
   instead of assuming width is proportional to sigma.
 - `mondrian_cp` sigmas are saved as ones; the bin ids aren't saved.
 
+### 2026-09-24 (branch `global-q-loss`)
+Aligned the `bin_crossfit` loss with what gets deployed, after tracing
+stepped/stratified SR widths (e.g. Moneyball, complexity 9,
+`0.0036 * logm(...)` in `results-sigma-sr-full`) to two mismatches:
+
+- **Per-bin q in the loss vs. one global q at deployment.** With a q per
+  sigma bin, sigma's magnitude between bins doesn't matter (each bin's q
+  absorbs it), so SR only had to rank points into 4 bins. The Moneyball
+  equation's raw sigma spreads only 1.18x -- almost standard CP -- yet
+  scored well. The loss now computes one global conformal quantile
+  (finite-sample rank ceil((1-alpha)(m+1)), as in crepes) per cross-fit
+  direction; the 4 sigma-rank bins only measure conditional coverage for
+  the penalty.
+- **Min-max scaling at deployment.** `DifficultyEstimator.fit(f=...,
+  scaler=True)` min-max scales sigma to [0, 1] on the training set, clips,
+  and adds beta=0.01. That shifts sigma, changing its ratios: Moneyball's
+  1.18x raw spread became 101x deployed. Across the 35 chosen equations the
+  deployed p95/p5 spread was a median 1.9x the raw one (up to 101x on
+  energy_efficiency; geographical_origin_of_music 1.00x -> 12.8x), with up
+  to 27% of test points clipped. SR sigma is now deployed with
+  `scaler=False, beta=0`, i.e. exactly exp(equation). Baseline kNN/variance
+  estimators keep their scaler.
+- The cross-fit split is now a fixed permutation per seed (sorted hashes of
+  (index, seed)) instead of `rand(n)` on every call, so all candidate
+  equations are scored on the same split.
+- `tests/test_losses.py` evaluates the Julia loss on synthetic data with
+  known sigma (log sigma = x0): oracle 2.97 < constant 4.08 << flattened
+  oracle (x0 * 0.01, same ranking, no spread) 17.1; scale-invariant;
+  width term matches global normalized CP.
+- Replaced the `mae` loss (L1 on log|residual|, i.e. the conditional
+  median) with `pinball`: pinball loss at tau = confidence on the same
+  log|residual| target, so the equation estimates the log of the
+  |residual| quantile a conformal interval at that level needs, not the
+  median. `pinball_loss_julia` in `utils/losses.py`; enable with
+  `loss_functions: [bin_crossfit, pinball]`. A 15-iteration PySR fit on
+  log sigma = x0 data recovers `x0 + 0.673` (true: x0 + log 1.96 = 0.673).
+  Old runs' `mae` results keep their name (`sr_mae`).
+- To do: `lambda_cov: 500` was set when the per-bin penalty barely did
+  anything (in-loss Mondrian almost guaranteed per-bin coverage); re-tune
+  with `scripts/run_lambda_cov_sweep.sh` before a full rerun, then compare
+  against `results-sigma-sr-full`.
+
 ### 2026-09-24
 Added a Conditional Coverage tab to the dashboard (Method Comparison and
 Hall of Fame; replaces "Residuals vs Coverage"): one sliding-window
@@ -65,6 +107,11 @@ and dropped: both condition on the outcome.
   intervals (q95 = 2.0x half-width) and too wide for its widest (0.67x);
   knn_res stays within 0.75-1.5x; knn_dist is badly mis-sized
   (4.6x to 0.05x).
+- Right-sizing (own-sigma x-axis) later removed from the Interval Width
+  tab too; it now shows width vs. y_pred only.
+- Difficulty Heatmap and Hall of Fame's Complexity x Decile now bin
+  columns by y_pred decile (shared across methods/equations) or own-sigma
+  decile, instead of residual-rank decile (outcome-conditioned).
 - `run_sigma_sr.py` now saves `testing_features.csv`;
   `src/analysis/backfill_testing_features.py` rebuilt it for
   `results-sigma-sr-full` (all 35 datasets matched the saved y_test).

@@ -12,10 +12,8 @@ Pareto front looked like for one dataset/loss, across five tabs --
   shared axis across different sigma estimators would misalign) -- does a
   more complex equation's difficulty estimate actually track the outcome
   tighter, or is it noise?
-- Interval Width: per-equation small multiples, width vs. y_pred or
-  right-sizing (|residual| quantile vs. half-width, grouped by the
-  equation's own width); see interval_width_view.py -- where does each
-  equation spend its width, and is it the right size?
+- Interval Width: per-equation small multiples, width vs. y_pred; see
+  interval_width_view.py -- where does each equation spend its width?
 - Conditional Coverage: same per-equation small multiples, sliding-window
   empirical coverage along a selectable x-axis (y_pred or own sigma),
   then mean width vs. worst-group coverage per equation (y_pred bins,
@@ -23,9 +21,9 @@ Pareto front looked like for one dataset/loss, across five tabs --
   conditional_coverage_view.py -- does added complexity buy real
   conditional calibration?
 - Complexity x Decile: coverage/width heatmap, rows = complexity, columns
-  = residual-rank decile (shared across every equation, so columns are
-  directly comparable row to row) -- where along the complexity path does
-  conditional coverage actually improve?
+  = deciles of y_pred (shared across every equation, so columns are
+  directly comparable row to row) or of each equation's own sigma --
+  where along the complexity path does conditional coverage improve?
 """
 
 import math
@@ -40,6 +38,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import conditional_coverage as cc  # noqa: E402
 import conditional_coverage_view  # noqa: E402
 import interval_width_view  # noqa: E402
 import data  # noqa: E402
@@ -239,7 +238,6 @@ with tab_width_resid:
             width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
             label=panel_title, color=complexity_color,
             testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
-            target_coverage=target_coverage,
             title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
             key_prefix="hof_width",
         )
@@ -267,19 +265,33 @@ with tab_heatmap:
     if not has_per_point:
         st.info(no_data_message)
     else:
-        heatmap_metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="hof_heatmap_metric")
+        col1, col2 = st.columns(2)
+        with col1:
+            bin_by = st.radio("Columns: deciles of", options=["y_pred", "Own sigma"], horizontal=True,
+                              key="hof_heatmap_bin_by")
+        with col2:
+            heatmap_metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="hof_heatmap_metric")
+        decile_label = "y_pred decile" if bin_by == "y_pred" else "own-sigma decile"
+        if bin_by == "Own sigma":
+            st.caption("Own-sigma deciles hold different points per equation; constant-sigma equations are left empty.")
         if heatmap_metric == "Coverage":
             st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
 
-        deciles = pd.qcut(df_pp["abs_residual"].rank(method="first"), N_DECILES, labels=False)
+        # y_pred deciles are shared by every equation, so a column holds the
+        # same points in every row; own-sigma deciles differ per equation
+        y_pred_deciles = cc.decile_ids(data.load_testing_data(run_path, dataset)["y_pred"], N_DECILES)
         rows_dict = {}
         for c in complexities:
+            deciles = y_pred_deciles if bin_by == "y_pred" else cc.decile_ids(df_pp[f"sigma_{c}"], N_DECILES)
+            if deciles is None:
+                rows_dict[panel_title(c)] = {}
+                continue
             value_col = f"covered_{c}" if heatmap_metric == "Coverage" else f"width_{c}"
             agg = df_pp.groupby(deciles)[value_col].agg("mean" if heatmap_metric == "Coverage" else "median")
             rows_dict[panel_title(c)] = {int(d): agg.loc[d] for d in agg.index}
 
         matrix = pd.DataFrame.from_dict(rows_dict, orient="index")
-        matrix = matrix.reindex(range(N_DECILES), axis=1)
+        matrix = matrix.reindex(index=[panel_title(c) for c in complexities], columns=range(N_DECILES))
 
         if heatmap_metric == "Coverage":
             color_kwargs = dict(colorscale=COVERAGE_COLORSCALE, zmid=target_coverage)
@@ -292,7 +304,7 @@ with tab_heatmap:
                 y=matrix.index,
                 colorbar=dict(title=heatmap_metric),
                 hovertemplate=(
-                    "%{y}<br>residual decile=%{x}<br>" + heatmap_metric.lower() + "=%{z:.3f}<extra></extra>"
+                    f"%{{y}}<br>{decile_label}=%{{x}}<br>" + heatmap_metric.lower() + "=%{z:.3f}<extra></extra>"
                 ),
                 **color_kwargs,
             )
@@ -300,10 +312,10 @@ with tab_heatmap:
         fig.update_layout(
             width=data.DETAIL_SIZE,
             height=max(data.DETAIL_SIZE * 0.5, 40 * len(matrix.index) + 150),
-            xaxis_title="Residual-rank decile (increasing |residual|)",
+            xaxis_title=f"{decile_label.capitalize()} (increasing)",
             yaxis_title="Complexity",
             title=(
-                f"{heatmap_metric} by residual-rank decile, across complexity — "
+                f"{heatmap_metric} by {decile_label}, across complexity — "
                 f'"{dataset}" — {data.method_label(f"sr_{loss_name}")}'
             ),
         )

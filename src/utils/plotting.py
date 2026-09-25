@@ -25,6 +25,7 @@ translations = {
     "var" : "CP normalized using variance of ensemble predictors",
     "mondrian_cp" : "Mondrian CP",
     "sr_bin_crossfit" : "Symbolic Regression CP (bin-crossfit loss)",
+    "sr_pinball" : "Symbolic Regression CP (pinball loss)",
     }
 
 # a fixed, colorblind-checked categorical palette (8 hues, order matters --
@@ -50,6 +51,7 @@ _METHOD_ORDER = [
     "var",
     "mondrian_cp",
     "sr_bin_crossfit",
+    "sr_pinball",
 ]
 METHOD_COLORS = dict(zip(_METHOD_ORDER, _CATEGORICAL_PALETTE))
 _FALLBACK_COLOR = "#898781" # muted ink, for any method key not listed above

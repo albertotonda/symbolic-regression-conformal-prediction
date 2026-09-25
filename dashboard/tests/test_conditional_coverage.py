@@ -70,24 +70,8 @@ def test_worst_bin_constant_score_is_nan():
     assert np.isnan(heldout) and worst is None
 
 
-def test_right_sizing_on_oracle_width_follows_diagonal():
-    rng = np.random.default_rng(5)
-    sigma = np.exp(rng.uniform(-1, 1, 20000))
-    abs_residual = np.abs(rng.standard_normal(20000)) * sigma
-    width = 2 * 1.96 * sigma  # oracle 95% interval for Gaussian noise
-    half, q, sizes = cc.right_sizing_bins(width, abs_residual, 0.95, n_bins=10)
-    assert len(half) == 10 and sizes.sum() == 20000
-    np.testing.assert_allclose(q, half, rtol=0.1)
-
-
-def test_right_sizing_groups_few_distinct_widths_by_value():
-    width = np.array([1.0, 1.0, 2.0, 2.0, 2.0])
-    half, q, sizes = cc.right_sizing_bins(width, np.array([0.1, 0.2, 0.3, 0.4, 0.5]), 0.5)
-    np.testing.assert_array_equal(half, [0.5, 1.0])
-    np.testing.assert_array_equal(sizes, [2, 3])
-
-
-def test_right_sizing_treats_float_noise_as_one_width():
-    width = 2.0 + np.array([0.0, 1e-12, -1e-12, 2e-12])
-    half, q, sizes = cc.right_sizing_bins(width, np.array([0.1, 0.2, 0.3, 0.4]), 0.5)
-    assert len(half) == 1 and sizes[0] == 4
+def test_decile_ids_orders_by_rank_and_skips_constant():
+    ids = cc.decile_ids(np.arange(100)[::-1], n_bins=10)
+    assert ids[0] == 9 and ids[-1] == 0
+    assert np.bincount(ids).tolist() == [10] * 10
+    assert cc.decile_ids(np.ones(50)) is None
