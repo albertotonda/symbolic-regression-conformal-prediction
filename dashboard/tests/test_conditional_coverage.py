@@ -68,3 +68,10 @@ def test_worst_bin_finds_miscovered_top_bin():
 def test_worst_bin_constant_score_is_nan():
     heldout, worst, n_bins = cc.worst_bin(np.ones(100), np.ones(100, dtype=bool))
     assert np.isnan(heldout) and worst is None
+
+
+def test_decile_ids_orders_by_rank_and_skips_constant():
+    ids = cc.decile_ids(np.arange(100)[::-1], n_bins=10)
+    assert ids[0] == 9 and ids[-1] == 0
+    assert np.bincount(ids).tolist() == [10] * 10
+    assert cc.decile_ids(np.ones(50)) is None

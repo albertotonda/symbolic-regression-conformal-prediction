@@ -33,6 +33,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import conditional_coverage as cc  # noqa: E402
 import conditional_coverage_view  # noqa: E402
 import interval_width_view  # noqa: E402
 import data  # noqa: E402
@@ -304,7 +305,8 @@ with tab_width_rank:
     _render_interval_width()
 
 # ---------------------------------------------------------------------------
-# Heatmap: rows = datasets, columns = residual-rank deciles.
+# Heatmap: rows = datasets, columns = deciles of y_pred (shared by every
+# method) or of each method's own sigma.
 # ---------------------------------------------------------------------------
 with tab_heatmap:
     def _render_heatmap():
@@ -317,29 +319,36 @@ with tab_heatmap:
         COVERAGE_COLORSCALE = [[0.0, "#2b6bab"], [0.5, "#ffffff"], [1.0, "#ab4b2b"]]
 
         per_point_by_dataset = {
-            ds: data.load_per_point(run_path, ds) for ds in all_datasets if data.has_per_point_data(run_path, ds)
+            ds: data.load_per_point(run_path, ds) for ds in all_datasets
+            if data.has_per_point_data(run_path, ds) and data.has_interval_detail_data(run_path, ds)
         }
         if not per_point_by_dataset:
             st.info(
                 "No per-point data in this run — it predates `src/run_sigma_sr.py` "
-                "writing `testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv` "
-                "(or the older `per_point.csv`). Select a newer run, or re-run the "
-                "experiment, to see this plot."
+                "writing `testing_data.csv`/`methods_sigmas_test.csv`/`methods_intervals.csv`. "
+                "Select a newer run, or re-run the experiment, to see this plot."
             )
             return
 
         all_methods = sorted({m for df in per_point_by_dataset.values() for m in data.per_point_methods(df)})
 
-        # one decile assignment per dataset, shared by every method -- binned
-        # on residual rank (method-independent), not each method's own sigma
-        # rank, so columns condition on the same points in every method's
-        # panel; see the module docstring's mismatch note for why.
-        deciles_by_dataset = {
-            ds: pd.qcut(df["abs_residual"].rank(method="first"), N_DECILES, labels=False)
-            for ds, df in per_point_by_dataset.items()
+        # y_pred deciles are one assignment per dataset, shared by every
+        # method, so a column holds the same points in every panel; own-sigma
+        # deciles differ per method (and are undefined for a constant sigma)
+        y_pred_deciles = {
+            ds: cc.decile_ids(data.load_testing_data(run_path, ds)["y_pred"], N_DECILES)
+            for ds in per_point_by_dataset
         }
 
-        metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="heatmap_metric")
+        col1, col2 = st.columns(2)
+        with col1:
+            bin_by = st.radio("Columns: deciles of", options=["y_pred", "Own sigma"], horizontal=True,
+                              key="heatmap_bin_by")
+        with col2:
+            metric = st.selectbox("Metric", options=["Coverage", "Median width"], key="heatmap_metric")
+        decile_label = "y_pred decile" if bin_by == "y_pred" else "own-sigma decile"
+        if bin_by == "Own sigma":
+            st.caption("Own-sigma deciles hold different points per method; constant-sigma methods are left empty.")
         if metric == "Coverage":
             st.caption(f"White = target coverage ({target_coverage:.2f}); red = over-covered, blue = under-covered.")
 
@@ -352,7 +361,10 @@ with tab_heatmap:
                 if df is None or value_col not in df.columns:
                     excluded += 1
                     continue
-                agg = df.groupby(deciles_by_dataset[ds])[value_col].agg("mean" if metric == "Coverage" else "median")
+                deciles = y_pred_deciles[ds] if bin_by == "y_pred" else cc.decile_ids(df[f"sigma_{method}"], N_DECILES)
+                if deciles is None:
+                    continue
+                agg = df.groupby(deciles)[value_col].agg("mean" if metric == "Coverage" else "median")
                 rows[ds] = {int(d): agg.loc[d] for d in agg.index}
             matrix = pd.DataFrame.from_dict(rows, orient="index")
             matrix = matrix.reindex(all_datasets, axis=0)
@@ -387,7 +399,7 @@ with tab_heatmap:
                         y=matrix.index,
                         coloraxis="coloraxis",
                         hovertemplate=(
-                            f"<b>{data.method_label(m)}</b><br>dataset=%{{y}}<br>residual decile=%{{x}}<br>"
+                            f"<b>{data.method_label(m)}</b><br>dataset=%{{y}}<br>{decile_label}=%{{x}}<br>"
                             + metric.lower() + "=%{z:.3f}<extra></extra>"
                         ),
                     ),
@@ -402,7 +414,7 @@ with tab_heatmap:
             fig.update_layout(
                 width=cols * 480, height=rows_n * panel_height,
                 coloraxis=coloraxis,
-                title=f"{metric} by residual-rank decile — all methods",
+                title=f"{metric} by {decile_label} — all methods",
             )
             st.plotly_chart(fig, width="content")
         else:
@@ -412,8 +424,9 @@ with tab_heatmap:
 
             if matrix_present.empty:
                 st.info(
-                    f"No dataset in this run has per-point data for **{data.method_label(method)}**. "
-                    "Pick a different method, or a newer run."
+                    f"No dataset in this run has per-point data for **{data.method_label(method)}**"
+                    + (" (or its sigma is constant)" if bin_by == "Own sigma" else "")
+                    + ". Pick a different method, or a newer run."
                 )
                 return
 
@@ -430,16 +443,16 @@ with tab_heatmap:
                     x=[f"D{c + 1}" for c in matrix_present.columns],
                     y=matrix_present.index,
                     colorbar=dict(title=metric),
-                    hovertemplate="dataset=%{y}<br>residual decile=%{x}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
+                    hovertemplate=f"dataset=%{{y}}<br>{decile_label}=%{{x}}<br>" + metric.lower() + "=%{z:.3f}<extra></extra>",
                     **color_kwargs,
                 )
             )
             fig.update_layout(
                 width=data.DETAIL_SIZE,
                 height=max(data.DETAIL_SIZE * 0.5, 40 * len(matrix_present.index) + 150),
-                xaxis_title="Residual-rank decile (increasing |residual|)",
+                xaxis_title=f"{decile_label.capitalize()} (increasing)",
                 yaxis_title=None,
-                title=f"{metric} by residual-rank decile — {data.method_label(method)}",
+                title=f"{metric} by {decile_label} — {data.method_label(method)}",
             )
             st.plotly_chart(fig, width="content")
 

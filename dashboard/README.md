@@ -37,10 +37,10 @@ Sidebar pages, each with several tabs:
     (test only), unbinned, one subplot per method
   - Interval Width — one subplot per method, per-point width vs. y_pred
     plus a sliding-window median: where each method spends its width
-  - Difficulty Heatmap — coverage/width by residual-rank decile; Grid (all
-    methods) or Detail (single method) radio; binned on residual rank
-    rather than each method's own sigma rank, so columns are directly
-    comparable method-to-method
+  - Difficulty Heatmap — coverage/width by decile of y_pred (shared by
+    every method, so columns are directly comparable method-to-method) or
+    of each method's own sigma; Grid (all methods) or Detail (single
+    method) radio
   - Dataset Characteristics — method width ratio vs. dataset size/features/R2
   - Confidence Intervals — sanity-check view of actual/predicted/interval
     band for a handful of test points
@@ -54,8 +54,8 @@ Sidebar pages, each with several tabs:
   by complexity), Sigma vs Outcome (each equation's own sigma vs.
   residual/width, unbinned), Interval Width and Conditional Coverage (same
   views as Method Comparison's, one subplot per equation), Complexity x
-  Decile (heatmap, rows = complexity, columns =
-  residual-rank decile)
+  Decile (heatmap, rows = complexity, columns = y_pred or own-sigma
+  decile)
 - **Training** (`pages/9_Training_Dynamics.py`) — Training Dynamics: SR
   loss-vs-iteration curves (from a precomputed `loss_curve_<loss>.csv`,
   falling back to the raw TensorBoard log for older runs) and a

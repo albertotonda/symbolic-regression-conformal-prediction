@@ -94,6 +94,9 @@ and dropped: both condition on the outcome.
   (4.6x to 0.05x).
 - Right-sizing (own-sigma x-axis) later removed from the Interval Width
   tab too; it now shows width vs. y_pred only.
+- Difficulty Heatmap and Hall of Fame's Complexity x Decile now bin
+  columns by y_pred decile (shared across methods/equations) or own-sigma
+  decile, instead of residual-rank decile (outcome-conditioned).
 - `run_sigma_sr.py` now saves `testing_features.csv`;
   `src/analysis/backfill_testing_features.py` rebuilt it for
   `results-sigma-sr-full` (all 35 datasets matched the saved y_test).

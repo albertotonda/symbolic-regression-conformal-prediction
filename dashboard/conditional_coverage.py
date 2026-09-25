@@ -138,3 +138,12 @@ def worst_bin(order_values, covered, min_fraction=0.2, seed=0):
     worst = int(np.argmin(_bin_cov(search)))
     heldout = _bin_cov(~search)[worst]
     return float(heldout) if np.isfinite(heldout) else float("nan"), worst, n_bins
+
+
+def decile_ids(values, n_bins=10):
+    """Equal-count bin index (0 .. n_bins-1) of each point by rank of
+    `values`, or None if `values` is constant (ranks would be arbitrary)."""
+    values = np.asarray(values, dtype=float)
+    if np.unique(values).size <= 1:
+        return None
+    return pd.qcut(pd.Series(values).rank(method="first"), n_bins, labels=False).to_numpy()
