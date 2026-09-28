@@ -8,10 +8,18 @@ openml_params:
 results_csv_name: results.csv
 datasets: [superconductivity, miami_housing, california_housing, abalone] # lambda_cov sweep subset
 
+split:
+    train: 50
+    sr_train: 0 # set to 0 for oob prediction for SR
+    cal: 25
+    test: 25
+
 predictor_model: RandomForestRegressor
-predictor_params:
-    n_estimators: 500
-    oob_score: True
+predictor_params: {
+    "RandomForestRegressor": {
+        "n_estimators": 500
+    }
+}
 
 data_augmentation:
     sigma_knn_dist: False

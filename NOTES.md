@@ -10,6 +10,19 @@
 
 ## Chronological notes
 
+### 2026-09-28
+
+- `run_sigma_sr.py` now works with any `predictor_model` (RF, SVR, XGB,
+  LinearRegression), set up through `split` (train/sr_train/cal/test in %).
+  `sr_train: 0` keeps the old setup (SR trained on the RF's out-of-bag
+  residuals, RF only). `sr_train > 0` trains the SR, `knn_res` and the
+  extra regressors on residuals from a separate SR split that the base
+  model never saw. `var`/`mondrian_cp` are only run for RF.
+- Bug (also on main): with data augmentation turned on, the SR/extra-regressor
+  intervals sent the augmented X to the base regressor, which crashed.
+  `compute_normalized_intervals` now takes the difficulty estimator's
+  inputs separately (`X_cal_de`/`X_test_de`).
+
 ### 2026-09-25
 
 - Mondrian CP audit: rebuilding `mondrian_cp` intervals from the saved

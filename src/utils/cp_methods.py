@@ -1,4 +1,4 @@
-from crepes import WrapRegressor
+from crepes import WrapRegressor, ConformalRegressor
 from crepes.extras import DifficultyEstimator, binning
 
 import numpy as np
@@ -7,9 +7,11 @@ def fit_difficulty_estimator(X_prop_train : np.ndarray,
                             type : str,
                             oob : bool = False,
                             y_prop_train : np.ndarray = None,
-                            learner_prop = None) -> DifficultyEstimator:
+                            learner_prop = None,
+                            residuals : np.ndarray = None) -> DifficultyEstimator:
     """
-    Fit the difficulty estimator depending on type
+    Fit the difficulty estimator depending on type. For "knn_res", residuals
+    default to the learner's out-of-bag residuals when not given.
     """
     de = DifficultyEstimator()
     match type:
@@ -19,29 +21,31 @@ def fit_difficulty_estimator(X_prop_train : np.ndarray,
             assert y_prop_train is not None
             de.fit(X=X_prop_train, y=y_prop_train, scaler=True, oob=oob)
         case "knn_res":
-            assert y_prop_train is not None
-            assert learner_prop is not None 
-            y_pred_oob = learner_prop.oob_prediction_
-            residuals_prop_oob = y_prop_train - y_pred_oob
-            de.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True, oob=oob)
+            if residuals is None:
+                assert y_prop_train is not None
+                assert learner_prop is not None
+                residuals = y_prop_train - learner_prop.oob_prediction_
+            de.fit(X=X_prop_train, residuals=residuals, scaler=True, oob=oob)
         case "var":
             assert learner_prop is not None
             de.fit(X=X_prop_train, learner=learner_prop, scaler=True, oob=oob)
     return de
 
-def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confidence):
+def compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, confidence, X_cal_de=None, X_test_de=None):
     """
     Calibrate a normalized conformal regressor using an already-fitted
     DifficultyEstimator. Returns the confidence intervals for the test set,
     together with the difficulty estimates on the calibration and test sets.
+    X_cal_de/X_test_de are the estimator's inputs when they differ from the
+    learner's (e.g. augmented with sigma columns); they default to X_cal/X_test.
     """
-    sigmas_cal = de.apply(X_cal)
-    sigmas_test = de.apply(X_test)
+    sigmas_cal = de.apply(X_cal if X_cal_de is None else X_cal_de)
+    sigmas_test = de.apply(X_test if X_test_de is None else X_test_de)
 
-    regressor_norm = WrapRegressor(learner_prop)
-    regressor_norm.calibrate(X_cal, y_cal, de=de)
+    regressor_norm = ConformalRegressor()
+    regressor_norm.fit(residuals=y_cal - learner_prop.predict(X_cal), sigmas=sigmas_cal)
 
-    intervals = regressor_norm.predict_int(X_test, confidence=confidence)
+    intervals = regressor_norm.predict_int(y_hat=learner_prop.predict(X_test), sigmas=sigmas_test, confidence=confidence)
 
     return intervals, sigmas_cal, sigmas_test
 

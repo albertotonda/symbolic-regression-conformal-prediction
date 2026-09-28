@@ -21,3 +21,18 @@ def test_bin_thresholds_respect_min_size():
     counts = np.bincount(binning(sigmas, bins=thresholds, seed=42).astype(int))
     assert counts.min() >= min_points
     assert len(counts) == 1000 // min_points
+
+
+def test_normalized_intervals_match_wrap_regressor():
+    from crepes import WrapRegressor
+    from sklearn.ensemble import RandomForestRegressor
+    from utils.cp_methods import fit_difficulty_estimator, compute_normalized_intervals
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(300, 3))
+    y = X[:, 0] + rng.normal(size=300) * np.abs(X[:, 1])
+    learner = RandomForestRegressor(n_estimators=20, random_state=0).fit(X[:100], y[:100])
+    de = fit_difficulty_estimator(X[:100], "knn_dist")
+    intervals, _, _ = compute_normalized_intervals(de, learner, X[100:200], y[100:200], X[200:], 0.9)
+    wrapped = WrapRegressor(learner)
+    wrapped.calibrate(X[100:200], y[100:200], de=de)
+    assert np.allclose(intervals, wrapped.predict_int(X[200:], confidence=0.9))
