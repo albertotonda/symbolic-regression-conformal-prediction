@@ -47,12 +47,13 @@ def validate_sigma_sr_config(config):
 def build_predictor(config, random_seed):
     """
     Instantiate predictor_model with its predictor_params entry. Out-of-bag
-    predictions are enabled when the SR is trained on them (sr_train == 0).
+    predictions are always enabled for RandomForestRegressor (SR training
+    when sr_train == 0, knn_res residuals).
     """
     params = dict(config.predictor_params.get(config.predictor_model) or {})
     predictor = PREDICTOR_MODELS[config.predictor_model](**params)
     if "random_state" in predictor.get_params():
         predictor.set_params(random_state=random_seed)
-    if config.split.sr_train == 0:
+    if config.predictor_model == "RandomForestRegressor":
         predictor.set_params(oob_score=True)
     return predictor

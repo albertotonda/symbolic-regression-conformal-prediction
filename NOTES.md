@@ -15,9 +15,16 @@
 - `run_sigma_sr.py` now works with any `predictor_model` (RF, SVR, XGB,
   LinearRegression), set up through `split` (train/sr_train/cal/test in %).
   `sr_train: 0` keeps the old setup (SR trained on the RF's out-of-bag
-  residuals, RF only). `sr_train > 0` trains the SR, `knn_res` and the
-  extra regressors on residuals from a separate SR split that the base
-  model never saw. `var`/`mondrian_cp` are only run for RF.
+  residuals, RF only). `sr_train > 0` trains the SR and the extra regressors
+  on residuals from a separate SR split that the base model never saw.
+  `var`/`mondrian_cp` are only run for RF.
+- Normalized CP baselines (knn_dist, knn_std, knn_res, var) are always
+  fitted on the train split and calibrated on sr_train + cal, so they use
+  as much non-training data as the SR does. Their augmentation sigmas are
+  computed on sr_train only (out-of-bag when sr_train is 0). knn_res uses
+  out-of-bag residuals for RF (oob_score is always on for RF) and
+  in-sample residuals for other models, which makes it optimistic for
+  models that overfit. standard_cp and mondrian_cp still calibrate on cal only.
 - Bug (also on main): with data augmentation turned on, the SR/extra-regressor
   intervals sent the augmented X to the base regressor, which crashed.
   `compute_normalized_intervals` now takes the difficulty estimator's

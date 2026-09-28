@@ -68,6 +68,6 @@ def test_build_predictor_oob_and_params():
     rf = build_predictor(_config("RandomForestRegressor", 0, params), random_seed=3)
     assert rf.oob_score and rf.n_estimators == 7 and rf.random_state == 3
     rf = build_predictor(_config("RandomForestRegressor", 20, params), random_seed=3)
-    assert not rf.oob_score
+    assert rf.oob_score
     # a model without a predictor_params entry uses its defaults
     build_predictor(_config("SVR", 20, params), random_seed=3)

@@ -90,24 +90,34 @@ def run_single_task(dataset, task_folder, config, random_seed):
     sigmas_test["standard_cp"] = np.ones(len(X_test))
     conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=config.confidence)
 
-    # KNN distance and KNN std, fitted on the training set
-    # de.apply(X) on a real X doesn't depend on the oob flag for KNN-based methods, so a
-    # single fit serves both compute_normalized_intervals and augmentation.
-    # With an SR split, augmentation applies the estimator to X_sr directly.
-    for key, y_fit in (("knn_dist", None), ("knn_std", y_prop_train)):
+    # Normalized CP baselines: difficulty estimators are fitted on the training
+    # set and calibrated on sr_train + cal, so they use as much non-training
+    # data as the SR does. Saved cal sigmas are restricted to the cal split.
+    if use_oob:
+        X_calib_norm, y_calib_norm = X_cal, y_cal
+    else:
+        X_calib_norm, y_calib_norm = np.concatenate((X_sr, X_cal)), np.concatenate((y_sr, y_cal))
+
+    def normalized_intervals(de):
+        intervals, sigmas_calib, sigmas_test_de = compute_normalized_intervals(de, learner_prop, X_calib_norm, y_calib_norm, X_test, config.confidence)
+        return intervals, sigmas_calib[-len(X_cal):], sigmas_test_de
+
+    # Data augmentation only uses the SR split. Without one, the SR trains on
+    # the training set, so sigmas come from the out-of-bag branch (de.apply()
+    # with no X); de.apply(X) on a real X doesn't depend on the oob flag for
+    # KNN-based methods, so a single fit serves both uses.
+    knn_estimators = {
+        "knn_dist": dict(),
+        "knn_std": dict(y_prop_train=y_prop_train),
+        # out-of-bag residuals for RF, in-sample residuals otherwise
+        "knn_res": dict(residuals=y_prop_train - (learner_prop.oob_prediction_ if is_forest else learner_prop.predict(X_prop_train))),
+    }
+    for key, kwargs in knn_estimators.items():
         augment = config.data_augmentation[f"sigma_{key}"]
-        de = fit_difficulty_estimator(X_prop_train, key, y_prop_train=y_fit, oob=augment and use_oob)
-        conf_intervals[key], sigmas_cal[key], sigmas_test[key] = compute_normalized_intervals(de, learner_prop, X_cal, y_cal, X_test, config.confidence)
+        de = fit_difficulty_estimator(X_prop_train, key, oob=augment and use_oob, **kwargs)
+        conf_intervals[key], sigmas_cal[key], sigmas_test[key] = normalized_intervals(de)
         if augment:
             sigmas_sr[key] = de.apply() if use_oob else de.apply(X_sr)
-
-    # KNN residuals, fitted on the SR residuals (out-of-bag or SR split);
-    # oob=True makes augmentation leave each point out of its own neighbours
-    augment_knn_res = config.data_augmentation.sigma_knn_res
-    de_knn_res = fit_difficulty_estimator(X_sr, "knn_res", residuals=residuals_sr, oob=augment_knn_res)
-    conf_intervals["knn_res"], sigmas_cal["knn_res"], sigmas_test["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal, y_cal, X_test, config.confidence)
-    if augment_knn_res:
-        sigmas_sr["knn_res"] = de_knn_res.apply()
 
     if is_forest:
         # Random Forest variance
@@ -115,7 +125,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
         # DOES depend on the oob flag (the oob branch expects X sized to the
         # training set)
         de_var = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop)
-        conf_intervals["var"], sigmas_cal["var"], sigmas_test["var"] = compute_normalized_intervals(de_var, learner_prop, X_cal, y_cal, X_test, config.confidence)
+        conf_intervals["var"], sigmas_cal["var"], sigmas_test["var"] = normalized_intervals(de_var)
         if config.data_augmentation.sigma_var:
             if use_oob:
                 de_var_oob = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop, oob=True)
