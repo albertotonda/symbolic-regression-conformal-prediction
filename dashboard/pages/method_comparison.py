@@ -3,15 +3,15 @@
 Hall of Fame's one-page/many-tabs layout instead of one page per view).
 
 A single **Dataset** selector above the tabs drives every per-dataset tab
-(Sigma Relationships, Interval Width, Confidence Intervals, Conditional
+(Sigma vs Residuals, Interval Width, Confidence Intervals, Conditional
 Coverage, and Pareto's Detail view) -- pick it once instead of on each tab
-separately. Pareto's Grid view, Difficulty Heatmap, and Dataset
+separately. Pareto's Grid view, Coverage per Decile, and Dataset
 Characteristics are inherently cross-dataset (every dataset at once) and
 ignore it. Target-variable/
 prediction/residual distributions for one dataset live on their own
 "Dataset Analysis" page instead of a tab here.
 
-Streamlit tabs can't nest, so Pareto's and Difficulty Heatmap's own
+Streamlit tabs can't nest, so Pareto's and Coverage per Decile's own
 Grid-vs-Detail split (previously a second level of `st.tabs`) is a radio
 button instead, inside their own outer tab.
 
@@ -58,7 +58,7 @@ dataset = st.selectbox(
     options=all_datasets,
     key="mc_dataset",
     help=(
-        "Used by every per-dataset tab (Sigma Relationships, Interval Width, "
+        "Used by every per-dataset tab (Sigma vs Residuals, Interval Width, "
         "Confidence Intervals, Conditional Coverage, and Pareto's Detail view). Pareto's Grid view, Difficulty "
         "Heatmap, and Dataset Characteristics always show every dataset "
         "regardless of this."
@@ -69,8 +69,8 @@ dataset = st.selectbox(
     tab_pareto, tab_sigma_rel, tab_width_rank, tab_heatmap,
     tab_characteristics, tab_ci, tab_sigma_cov,
 ) = st.tabs([
-    "Pareto", "Sigma Relationships", "Interval Width", "Difficulty Heatmap",
-    "Dataset Characteristics", "Confidence Intervals", "Conditional Coverage",
+    "Pareto", "Conditional Coverage", "Interval Width", "Sigma vs Residuals", "Coverage per Decile",
+    "Dataset Characteristics", "Confidence Intervals",
 ])
 
 # ---------------------------------------------------------------------------
@@ -600,8 +600,7 @@ with tab_ci:
 
 # ---------------------------------------------------------------------------
 # Conditional coverage: sliding-window coverage along a selectable x-axis
-# (y_pred, own sigma, or the worst-slab projection), one
-# subplot per method, then mean width vs. worst-group coverage; see
+# (y_pred or own sigma), one subplot per method, then mean width vs. worst-group coverage; see
 # conditional_coverage_view.py.
 # ---------------------------------------------------------------------------
 with tab_sigma_cov:
@@ -616,7 +615,6 @@ with tab_sigma_cov:
 
         df = data.load_per_point(run_path, dataset)
         testing = data.load_testing_data(run_path, dataset).reset_index(drop=True)
-        features = data.load_testing_features(run_path, dataset)
         all_methods = data.per_point_methods(df)
 
         methods = st.multiselect(
@@ -635,7 +633,6 @@ with tab_sigma_cov:
             width_by_key={m: df[f"width_{m}"].to_numpy() for m in methods},
             label=data.method_label, color=data.method_color,
             testing=testing,
-            features=None if features is None else features.reset_index(drop=True),
             target_coverage=target_coverage,
             title=f'"{dataset}"',
             key_prefix="mc_cond_cov",

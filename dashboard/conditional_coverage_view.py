@@ -12,9 +12,8 @@ per CP method) and the Hall of Fame page (one panel per SR equation).
      panels share an axis. Checks whether a method is calibrated with
      respect to its own difficulty claims; panels hold different points.
 2. Mean width vs. worst-group coverage, one point per panel, with groups
-   defined from information known before seeing y: y_pred bins, own-sigma
-   bins, or the worst slab of the test features (see
-   conditional_coverage.py; each panel gets its own adversarial search).
+   defined from information known before seeing y: y_pred bins or
+   own-sigma bins.
 """
 
 import math
@@ -41,17 +40,8 @@ X_AXIS_QUESTIONS = {
         "Panels hold different points."
     ),
 }
-GROUPINGS = ["Worst slab", "y_pred bins", "Own sigma bins"]
+GROUPINGS = ["y_pred bins", "Own sigma bins"]
 _SEED = 0
-_NO_FEATURES = (
-    "This run has no `testing_features.csv`. Rebuild it with "
-    "`uv run src/analysis/backfill_testing_features.py <run folder>`."
-)
-
-
-@st.cache_data(show_spinner="Searching worst slabs…")
-def _cached_worst_slabs(X, covered_by_key, delta):
-    return cc.worst_slabs(X, covered_by_key, delta=delta, seed=_SEED)
 
 
 def _is_constant(values):
@@ -63,25 +53,23 @@ def _quantile(values):
     return pd.Series(values).rank(method="average", pct=True).to_numpy()
 
 
-def render(keys, covered_by_key, sigma_by_key, width_by_key, label, color, testing, features,
+def render(keys, covered_by_key, sigma_by_key, width_by_key, label, color, testing,
            target_coverage, title, key_prefix, highlight=None):
     """Draw the tab body.
 
     keys: panels to show, in order. covered_by_key / sigma_by_key /
     width_by_key: key -> per-point array, aligned with `testing` rows.
     label/color: key -> str. testing: frame with y, y_pred, residuals.
-    features: normalized test features aligned with `testing`, or None if
-    the run lacks them. highlight: key drawn with an outline in the
-    width-vs-coverage chart (e.g. the chosen equation).
+    highlight: key drawn with an outline in the width-vs-coverage chart
+    (e.g. the chosen equation).
     """
     covered_by_key = {k: np.asarray(covered_by_key[k], dtype=bool) for k in keys}
-    X = None if features is None else features.to_numpy(dtype=float)
 
     _render_coverage_plot(keys, covered_by_key, sigma_by_key, label, color, testing,
                           target_coverage, title, key_prefix)
     st.divider()
     _render_width_vs_worst_group(keys, covered_by_key, sigma_by_key, width_by_key, label, color,
-                                 testing, X, target_coverage, title, key_prefix, highlight)
+                                 testing, target_coverage, title, key_prefix, highlight)
 
 
 def _render_coverage_plot(keys, covered_by_key, sigma_by_key, label, color, testing,
@@ -144,7 +132,7 @@ def _render_coverage_plot(keys, covered_by_key, sigma_by_key, label, color, test
 
 
 def _render_width_vs_worst_group(keys, covered_by_key, sigma_by_key, width_by_key, label, color,
-                                 testing, X, target_coverage, title, key_prefix, highlight):
+                                 testing, target_coverage, title, key_prefix, highlight):
     st.subheader("Mean width vs. worst-group coverage")
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -166,13 +154,7 @@ def _render_width_vs_worst_group(keys, covered_by_key, sigma_by_key, width_by_ke
             "at the target). Compare methods cautiously on this dataset."
         )
 
-    if grouping == "Worst slab":
-        if X is None:
-            st.info(_NO_FEATURES)
-            return
-        slabs = _cached_worst_slabs(X, covered_by_key, min_pct / 100)
-        worst = {k: slabs[k].heldout_coverage for k in keys}
-    elif grouping == "y_pred bins":
+    if grouping == "y_pred bins":
         y_pred = testing["y_pred"].to_numpy()
         worst = {k: cc.worst_bin(y_pred, covered_by_key[k], min_pct / 100, seed=_SEED)[0] for k in keys}
     else:

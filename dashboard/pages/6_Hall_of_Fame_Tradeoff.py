@@ -2,25 +2,25 @@
 """Hall-of-Fame analysis: everything the SR search's final complexity/loss
 Pareto front looked like for one dataset/loss, across five tabs --
 
-- Trade-off: every equation scattered by (coverage, interval width),
+- Pareto: every equation scattered by (coverage, interval width),
   colored by complexity, chosen one highlighted -- does the chosen
   equation actually sit at a good point of the trade-off?
-- Sigma vs Outcome: each equation's own per-point sigma against residual or
+- Conditional Coverage: same per-equation small multiples, sliding-window
+  empirical coverage along a selectable x-axis (y_pred or own sigma),
+  then mean width vs. worst-group coverage per equation (y_pred bins or
+  own-sigma bins); see
+  conditional_coverage_view.py -- does added complexity buy real
+  conditional calibration?
+- Interval Width: per-equation small multiples, width vs. y_pred; see
+  interval_width_view.py -- where does each equation spend its width?
+- Sigma vs Residuals: each equation's own per-point sigma against residual or
   width -- raw scatter plus a binned (equal-count bins on the target,
   median sigma per bin) trend line on top, one subplot per equation (own
   axis, not shared -- see 4_Difficulty_Heatmap.py's docstring for why a
   shared axis across different sigma estimators would misalign) -- does a
   more complex equation's difficulty estimate actually track the outcome
   tighter, or is it noise?
-- Interval Width: per-equation small multiples, width vs. y_pred; see
-  interval_width_view.py -- where does each equation spend its width?
-- Conditional Coverage: same per-equation small multiples, sliding-window
-  empirical coverage along a selectable x-axis (y_pred or own sigma),
-  then mean width vs. worst-group coverage per equation (y_pred bins,
-  own-sigma bins, or worst slab); see
-  conditional_coverage_view.py -- does added complexity buy real
-  conditional calibration?
-- Complexity x Decile: coverage/width heatmap, rows = complexity, columns
+- Coverage per Decile: coverage/width heatmap, rows = complexity, columns
   = deciles of y_pred (shared across every equation, so columns are
   directly comparable row to row) or of each equation's own sigma --
   where along the complexity path does conditional coverage improve?
@@ -98,7 +98,7 @@ def panel_title(c):
 
 
 tab_tradeoff, tab_outcome, tab_width_resid, tab_coverage, tab_heatmap = st.tabs(
-    ["Trade-off", "Sigma vs Outcome", "Interval Width", "Conditional Coverage", "Complexity x Decile"]
+    ["Pareto", "Conditional Coverage", "Interval Width", "Sigma vs Residuals", "Coverage per Decile"]
 )
 
 with tab_tradeoff:
@@ -196,7 +196,7 @@ with tab_outcome:
             bin_sigma = [np.median(sigma_vals[b]) for b in bins]
             # white halo drawn under the trend line so it stays legible on
             # top of a dense scatter, same treatment as method_comparison.py's
-            # Sigma Relationships tab.
+            # Sigma vs Residuals tab.
             fig.add_trace(
                 go.Scatter(
                     x=bin_log_target, y=bin_sigma, mode="lines",
@@ -246,7 +246,6 @@ with tab_coverage:
     if not has_per_point:
         st.info(no_data_message)
     else:
-        features = data.load_testing_features(run_path, dataset)
         conditional_coverage_view.render(
             keys=complexities,
             covered_by_key={c: df_pp[f"covered_{c}"].to_numpy() for c in complexities},
@@ -254,7 +253,6 @@ with tab_coverage:
             width_by_key={c: df_pp[f"width_{c}"].to_numpy() for c in complexities},
             label=panel_title, color=complexity_color,
             testing=data.load_testing_data(run_path, dataset).reset_index(drop=True),
-            features=None if features is None else features.reset_index(drop=True),
             target_coverage=target_coverage,
             title=f'"{dataset}" — {data.method_label(f"sr_{loss_name}")} equations',
             key_prefix="hof_cond_cov",
