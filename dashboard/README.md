@@ -29,15 +29,15 @@ across the run's datasets).
 Sidebar pages, each with several tabs:
 - **Method Comparison** (`pages/method_comparison.py`) — a single **Dataset**
   selector above the tabs drives every per-dataset tab; Pareto's Grid view,
-  Difficulty Heatmap, and Dataset Characteristics always show every dataset
+  Coverage per Decile, and Dataset Characteristics always show every dataset
   regardless of it (see the module docstring). Tabs:
   - Pareto — median width vs. coverage; Grid (all datasets) or Detail
     (single dataset, via the shared selector) radio
-  - Sigma Relationships — sigma vs. residual (calibration or test) or width
+  - Sigma vs Residuals — sigma vs. residual (calibration or test) or width
     (test only), unbinned, one subplot per method
   - Interval Width — one subplot per method, per-point width vs. y_pred
     plus a sliding-window median: where each method spends its width
-  - Difficulty Heatmap — coverage/width by decile of y_pred (shared by
+  - Coverage per Decile — coverage/width by decile of y_pred (shared by
     every method, so columns are directly comparable method-to-method) or
     of each method's own sigma; Grid (all methods) or Detail (single
     method) radio
@@ -49,8 +49,8 @@ Sidebar pages, each with several tabs:
     it answers. Below it, mean width vs. worst-group coverage, one point
     per method, with groups from y_pred bins or own-sigma bins
 - **Hall of Fame** (`pages/6_Hall_of_Fame_Tradeoff.py`) — one dataset/loss's
-  SR equations at a time, five tabs: Trade-off (coverage vs. width, colored
-  by complexity), Sigma vs Outcome (each equation's own sigma vs.
+  SR equations at a time, five tabs: Pareto (coverage vs. width, colored
+  by complexity), Sigma vs Residuals (each equation's own sigma vs.
   residual/width, unbinned), Interval Width and Conditional Coverage (same
   views as Method Comparison's, one subplot per equation), Complexity x
   Decile (heatmap, rows = complexity, columns = y_pred or own-sigma
@@ -61,7 +61,7 @@ Sidebar pages, each with several tabs:
   convergence-speed comparison across datasets
 
 Streamlit tabs can't nest, so a page whose own view has a Grid/Detail split
-(Pareto, Difficulty Heatmap) uses a radio button for that, not a second
+(Pareto, Coverage per Decile) uses a radio button for that, not a second
 level of `st.tabs`.
 
 ## Adding a new plot

@@ -109,7 +109,7 @@ and dropped: both condition on the outcome.
   (4.6x to 0.05x).
 - Right-sizing (own-sigma x-axis) later removed from the Interval Width
   tab too; it now shows width vs. y_pred only.
-- Difficulty Heatmap and Hall of Fame's Complexity x Decile now bin
+- Coverage per Decile and Hall of Fame's Coverage per Decile now bin
   columns by y_pred decile (shared across methods/equations) or own-sigma
   decile, instead of residual-rank decile (outcome-conditioned).
 - `run_sigma_sr.py` now saves `testing_features.csv`;
@@ -137,9 +137,9 @@ shape now has to come from both discovering similar structure independently
 from raw features, not from SR literally having that column as an input to
 select/rescale.
 
-Also changed `dashboard/pages/method_comparison.py`'s "Sigma Relationships"
+Also changed `dashboard/pages/method_comparison.py`'s "Sigma vs Residuals"
 tab from an unbinned per-point scatter to the same equal-count-bins/median
-pattern already used by "Width by Residual Rank" and the Difficulty Heatmap
+pattern already used by "Width by Residual Rank" and the Coverage per Decile
 (`N_BINS = 15`, bin on the target — `abs_residual` or `width_<method>` —
 median sigma per bin, one line per method's own subplot). Confirms the
 non-monotonicity/non-linearity in the sigma-vs-residual relationship is not
