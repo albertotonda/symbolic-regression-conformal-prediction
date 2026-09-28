@@ -17,14 +17,13 @@
   `sr_train: 0` keeps the old setup (SR trained on the RF's out-of-bag
   residuals, RF only). `sr_train > 0` trains the SR and the extra regressors
   on residuals from a separate SR split that the base model never saw.
-  `var`/`mondrian_cp` are only run for RF.
+  `knn_res`/`var`/`mondrian_cp` are only run for RF.
 - Normalized CP baselines (knn_dist, knn_std, knn_res, var) are always
   fitted on the train split and calibrated on sr_train + cal, so they use
   as much non-training data as the SR does. Their augmentation sigmas are
   computed on sr_train only (out-of-bag when sr_train is 0). knn_res uses
-  out-of-bag residuals for RF (oob_score is always on for RF) and
-  in-sample residuals for other models, which makes it optimistic for
-  models that overfit. standard_cp and mondrian_cp are also calibrated on
+  out-of-bag residuals on the train split (oob_score is always on for RF),
+  so it is skipped for other models. standard_cp and mondrian_cp are also calibrated on
   sr_train + cal (Mondrian bins are sized on that set).
 - Bug (also on main): with data augmentation turned on, the SR/extra-regressor
   intervals sent the augmented X to the base regressor, which crashed.

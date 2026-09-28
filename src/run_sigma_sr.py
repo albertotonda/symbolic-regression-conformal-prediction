@@ -110,9 +110,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
     knn_estimators = {
         "knn_dist": dict(),
         "knn_std": dict(y_prop_train=y_prop_train),
-        # out-of-bag residuals for RF, in-sample residuals otherwise
-        "knn_res": dict(residuals=y_prop_train - (learner_prop.oob_prediction_ if is_forest else learner_prop.predict(X_prop_train))),
     }
+    # knn_res needs held-out residuals on the training set: out-of-bag, RF only
+    if is_forest:
+        knn_estimators["knn_res"] = dict(residuals=y_prop_train - learner_prop.oob_prediction_)
     for key, kwargs in knn_estimators.items():
         augment = config.data_augmentation[f"sigma_{key}"]
         de = fit_difficulty_estimator(X_prop_train, key, oob=augment and use_oob, **kwargs)
@@ -153,9 +154,10 @@ def run_single_task(dataset, task_folder, config, random_seed):
         sigmas_test["mondrian_cp"] = np.ones(len(X_test))
         conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=config.confidence)
     else:
-        if config.data_augmentation.sigma_var:
-            print(f"sigma_var augmentation needs RandomForestRegressor, skipping for {config.predictor_model}")
-        print(f"var and mondrian_cp need RandomForestRegressor, skipping for {config.predictor_model}")
+        for key in ("knn_res", "var"):
+            if config.data_augmentation[f"sigma_{key}"]:
+                print(f"sigma_{key} augmentation needs RandomForestRegressor, skipping for {config.predictor_model}")
+        print(f"knn_res, var and mondrian_cp need RandomForestRegressor, skipping for {config.predictor_model}")
 
     # augment input using sigmas
     X_train_sr = np.zeros((X_sr.shape[0], len(sigmas_sr)), dtype=np.float32)
