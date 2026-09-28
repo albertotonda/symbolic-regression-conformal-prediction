@@ -84,22 +84,23 @@ def run_single_task(dataset, task_folder, config, random_seed):
     sigmas_sr = {} # For data augmentation
     sigmas_cal, sigmas_test, conf_intervals = {}, {}, {}
 
+    # CP baselines (standard, normalized, Mondrian) are calibrated on
+    # sr_train + cal, so they use as much non-training data as the SR does.
+    # Normalized estimators are fitted on the training set; saved cal sigmas
+    # are restricted to the cal split.
+    if use_oob:
+        X_calib, y_calib = X_cal, y_cal
+    else:
+        X_calib, y_calib = np.concatenate((X_sr, X_cal)), np.concatenate((y_sr, y_cal))
+
     # Standard CP
-    base_regressor.calibrate(X_cal, y_cal)
+    base_regressor.calibrate(X_calib, y_calib)
     sigmas_cal["standard_cp"] = np.ones(len(X_cal))
     sigmas_test["standard_cp"] = np.ones(len(X_test))
     conf_intervals["standard_cp"] = base_regressor.predict_int(X_test, confidence=config.confidence)
 
-    # Normalized CP baselines: difficulty estimators are fitted on the training
-    # set and calibrated on sr_train + cal, so they use as much non-training
-    # data as the SR does. Saved cal sigmas are restricted to the cal split.
-    if use_oob:
-        X_calib_norm, y_calib_norm = X_cal, y_cal
-    else:
-        X_calib_norm, y_calib_norm = np.concatenate((X_sr, X_cal)), np.concatenate((y_sr, y_cal))
-
     def normalized_intervals(de):
-        intervals, sigmas_calib, sigmas_test_de = compute_normalized_intervals(de, learner_prop, X_calib_norm, y_calib_norm, X_test, config.confidence)
+        intervals, sigmas_calib, sigmas_test_de = compute_normalized_intervals(de, learner_prop, X_calib, y_calib, X_test, config.confidence)
         return intervals, sigmas_calib[-len(X_cal):], sigmas_test_de
 
     # Data augmentation only uses the SR split. Without one, the SR trains on
@@ -135,7 +136,8 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
         # Mondrian CP using variance
         min_points = mondrian_min_bin_size(config.confidence)
-        bin_thresholds = find_bin_thresholds_with_min_size(sigmas_cal["var"], min_points, random_seed)
+        # bins are sized on the whole calibration set (sr_train + cal)
+        bin_thresholds = find_bin_thresholds_with_min_size(de_var.apply(X_calib), min_points, random_seed)
         number_of_bins = len(bin_thresholds) - 1
         print(f"Number of Mondrian bins: {number_of_bins}")
 
@@ -146,7 +148,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
             return binning(sigmas, bins=bin_thresholds, seed=random_seed)
 
         regressor_mond = WrapRegressor(learner_prop)
-        regressor_mond.calibrate(X_cal, y_cal, mc=mondrian_categories)
+        regressor_mond.calibrate(X_calib, y_calib, mc=mondrian_categories)
         sigmas_cal["mondrian_cp"] = np.ones(len(X_cal))
         sigmas_test["mondrian_cp"] = np.ones(len(X_test))
         conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=config.confidence)
