@@ -6,19 +6,22 @@ openml_params:
     suite_id: 353
 
 results_csv_name: results.csv
-datasets: [superconductivity, miami_housing, california_housing, abalone] # lambda_cov sweep subset
+datasets: [concrete_compressive_strength, airfoil_self_noise, abalone, miami_housing, superconductivity] # extra-set branch validation
 
 split:
     train: 50
-    sr_train: 0 # set to 0 for oob prediction for SR
-    cal: 25
-    test: 25
+    sr_train: 20 # set to 0 for oob prediction for SR
+    cal: 20
+    test: 10
 
 predictor_model: RandomForestRegressor
 predictor_params: {
     "RandomForestRegressor": {
         "n_estimators": 500
-    }
+    },
+    "SVR": {},
+    "XGBRegressor": {},
+    "LinearRegression": {}
 }
 
 data_augmentation:
@@ -27,14 +30,14 @@ data_augmentation:
     sigma_knn_res: False
     sigma_var: False
 
-loss_functions: [bin_crossfit, pinball]
+loss_functions: [bin_crossfit]
 lambda_cov : 500
 ncp_knn_k: 25
 
 sr_params:
     npopulations: 40
     population_size: 50
-    niterations: 100 # low for the lambda_cov sweep
+    niterations: 1000
     early_stop: False # set to False to run the full niterations (regular evolution, no plateau check)
     early_stop_chunk_size: 2
     early_stop_patience: 3

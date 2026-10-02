@@ -6,6 +6,7 @@ it into train/calibration/test sets.
 """
 
 import openml
+import numpy as np
 
 import pandas as pd
 
@@ -119,3 +120,42 @@ def split_and_normalize_data(df_X, df_y, random_seed):
     y_test       = scaler_y.transform(y_test.reshape(-1, 1)).ravel()
 
     return X_prop_train, X_cal, X_test, y_prop_train, y_cal, y_test
+
+
+SPLIT_NAMES = ("train", "sr_train", "cal", "test")
+
+def split_and_normalize_data_with_sr(df_X, df_y, split, random_seed):
+    """
+    Split data in training, SR-training, calibration and test sets using the
+    percentages in `split` (keys SPLIT_NAMES, summing to 100), and normalize
+    them with scalers fitted on the training set. Returns a dict mapping each
+    split name to (X, y); a split with 0% maps to (None, None).
+    """
+    if sum(split[name] for name in SPLIT_NAMES) != 100:
+        raise ValueError(f"split percentages must sum to 100, got {dict(split)}")
+
+    X = df_X.values
+    y = df_y.values
+
+    # boundaries of each split in a shuffled index array
+    perm = np.random.default_rng(random_seed).permutation(len(X))
+    cumulative = np.cumsum([split[name] for name in SPLIT_NAMES])
+    bounds = np.concatenate(([0], np.round(cumulative / 100 * len(X)).astype(int)))
+
+    scaler_X = StandardScaler()
+    scaler_y = StandardScaler()
+    train_idx = perm[bounds[0]:bounds[1]]
+    scaler_X.fit(X[train_idx])
+    scaler_y.fit(y[train_idx].reshape(-1, 1))
+
+    splits = {}
+    for i, name in enumerate(SPLIT_NAMES):
+        idx = perm[bounds[i]:bounds[i + 1]]
+        if split[name] == 0:
+            splits[name] = (None, None)
+            continue
+        splits[name] = (
+            scaler_X.transform(X[idx]),
+            scaler_y.transform(y[idx].reshape(-1, 1)).ravel(),
+        )
+    return splits
