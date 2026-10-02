@@ -10,6 +10,13 @@
 
 ## Chronological notes
 
+### 2026-10-02
+
+- With `sr_train > 0`, data augmentation only uses knn_dist and knn_std
+  (sigmas applied to the SR split, no out-of-bag). `sigma_knn_res` and
+  `sigma_var` are skipped with a message; they are only used with
+  `sr_train: 0`.
+
 ### 2026-09-28
 
 - `run_sigma_sr.py` now works with any `predictor_model` (RF, SVR, XGB,

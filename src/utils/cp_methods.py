@@ -1,4 +1,4 @@
-from crepes import WrapRegressor, ConformalRegressor
+from crepes import ConformalRegressor
 from crepes.extras import DifficultyEstimator, binning
 
 import numpy as np
@@ -7,11 +7,9 @@ def fit_difficulty_estimator(X_prop_train : np.ndarray,
                             type : str,
                             oob : bool = False,
                             y_prop_train : np.ndarray = None,
-                            learner_prop = None,
-                            residuals : np.ndarray = None) -> DifficultyEstimator:
+                            learner_prop = None) -> DifficultyEstimator:
     """
-    Fit the difficulty estimator depending on type. For "knn_res", residuals
-    default to the learner's out-of-bag residuals when not given.
+    Fit the difficulty estimator depending on type
     """
     de = DifficultyEstimator()
     match type:
@@ -21,11 +19,11 @@ def fit_difficulty_estimator(X_prop_train : np.ndarray,
             assert y_prop_train is not None
             de.fit(X=X_prop_train, y=y_prop_train, scaler=True, oob=oob)
         case "knn_res":
-            if residuals is None:
-                assert y_prop_train is not None
-                assert learner_prop is not None
-                residuals = y_prop_train - learner_prop.oob_prediction_
-            de.fit(X=X_prop_train, residuals=residuals, scaler=True, oob=oob)
+            assert y_prop_train is not None
+            assert learner_prop is not None
+            y_pred_oob = learner_prop.oob_prediction_
+            residuals_prop_oob = y_prop_train - y_pred_oob
+            de.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True, oob=oob)
         case "var":
             assert learner_prop is not None
             de.fit(X=X_prop_train, learner=learner_prop, scaler=True, oob=oob)
