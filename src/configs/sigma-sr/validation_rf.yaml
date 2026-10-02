@@ -1,0 +1,61 @@
+random_seeds: [42]
+confidence: 0.95
+
+data_source: openml # from "openml", "synthetic"
+openml_params:
+    suite_id: 353
+
+results_csv_name: results.csv
+datasets: [concrete_compressive_strength, airfoil_self_noise, abalone, miami_housing, superconductivity] # extra-set branch validation
+
+split:
+    train: 50
+    sr_train: 20 # set to 0 for oob prediction for SR
+    cal: 20
+    test: 10
+
+predictor_model: RandomForestRegressor
+predictor_params: {
+    "RandomForestRegressor": {
+        "n_estimators": 500
+    },
+    "SVR": {},
+    "XGBRegressor": {},
+    "LinearRegression": {}
+}
+
+data_augmentation:
+    sigma_knn_dist: False
+    sigma_knn_std: False
+    sigma_knn_res: False
+    sigma_var: False
+
+loss_functions: [bin_crossfit]
+lambda_cov : 500
+ncp_knn_k: 25
+
+sr_params:
+    npopulations: 40
+    population_size: 50
+    niterations: 1000
+    early_stop: False # set to False to run the full niterations (regular evolution, no plateau check)
+    early_stop_chunk_size: 2
+    early_stop_patience: 3
+    early_stop_min_improvement: 1.0e-3
+    binary_operators: ["+", "-", "*", "/"]
+    unary_operators: ["logm(x) = log(abs(x) + 1f-8)", "exp"]
+    nested_constraints: {
+        # "sin": {"cos": 0, "sin": 0}, 
+        # "cos": {"cos": 0, "sin": 0},
+        "logm": {"logm": 1},
+        "exp": {"exp": 0}
+    }
+    temp_equation_file: False
+
+extra_regressors:
+    random_forest: 
+        activate: False
+        n_estimators: 500
+    extra_trees:
+        activate: False
+        n_estimators: 500
