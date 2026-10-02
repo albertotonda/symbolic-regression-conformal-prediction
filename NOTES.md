@@ -16,6 +16,9 @@
   (sigmas applied to the SR split, no out-of-bag). `sigma_knn_res` and
   `sigma_var` are skipped with a message; they are only used with
   `sr_train: 0`.
+- Mondrian CP now runs for every predictor: `mondrian_cp` bins on the RF
+  variance sigmas (RandomForestRegressor), `mondrian_cp_knn_std` bins on the
+  knn_std sigmas (other predictors).
 
 ### 2026-09-28
 

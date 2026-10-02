@@ -143,27 +143,29 @@ def run_single_task(dataset, task_folder, config, random_seed):
         if config.data_augmentation.sigma_var and use_oob:
             de_var_oob = fit_difficulty_estimator(X_prop_train, "var", learner_prop=learner_prop, oob=True)
             sigmas_sr["var"] = de_var_oob.apply()
-
-        # Mondrian CP using variance
-        min_points = mondrian_min_bin_size(config.confidence)
-        # bins are sized on the whole calibration set (sr_train + cal)
-        bin_thresholds = find_bin_thresholds_with_min_size(de_var.apply(X_cal_cp), min_points, random_seed)
-        number_of_bins = len(bin_thresholds) - 1
-        print(f"Number of Mondrian bins: {number_of_bins}")
-
-        # the "mc" argument for calibrate()/predict_int() takes X as its only
-        # parameter, so the variance sigmas are recomputed from X
-        def mondrian_categories(X):
-            sigmas = de_var.apply(X)
-            return binning(sigmas, bins=bin_thresholds, seed=random_seed)
-
-        regressor_mond = WrapRegressor(learner_prop)
-        regressor_mond.calibrate(X_cal_cp, y_cal_cp, mc=mondrian_categories)
-        sigmas_cal["mondrian_cp"] = np.ones(len(X_cal))
-        sigmas_test["mondrian_cp"] = np.ones(len(X_test))
-        conf_intervals["mondrian_cp"] = regressor_mond.predict_int(X_test, confidence=config.confidence)
     else:
-        print(f"knn_res, var and mondrian_cp need RandomForestRegressor, skipping for {config.predictor_model}")
+        print(f"knn_res and var need RandomForestRegressor, skipping for {config.predictor_model}")
+
+    # Mondrian CP, binned on the variance sigmas ("mondrian_cp"), or on the
+    # knn_std sigmas when var isn't available ("mondrian_cp_knn_std")
+    de_mondrian, mondrian_key = (de_var, "mondrian_cp") if is_forest else (de_knn_std, "mondrian_cp_knn_std")
+    min_points = mondrian_min_bin_size(config.confidence)
+    # bins are sized on the whole calibration set (sr_train + cal)
+    bin_thresholds = find_bin_thresholds_with_min_size(de_mondrian.apply(X_cal_cp), min_points, random_seed)
+    number_of_bins = len(bin_thresholds) - 1
+    print(f"Number of Mondrian bins ({mondrian_key}): {number_of_bins}")
+
+    # the "mc" argument for calibrate()/predict_int() takes X as its only
+    # parameter, so the sigmas are recomputed from X
+    def mondrian_categories(X):
+        sigmas = de_mondrian.apply(X)
+        return binning(sigmas, bins=bin_thresholds, seed=random_seed)
+
+    regressor_mond = WrapRegressor(learner_prop)
+    regressor_mond.calibrate(X_cal_cp, y_cal_cp, mc=mondrian_categories)
+    sigmas_cal[mondrian_key] = np.ones(len(X_cal))
+    sigmas_test[mondrian_key] = np.ones(len(X_test))
+    conf_intervals[mondrian_key] = regressor_mond.predict_int(X_test, confidence=config.confidence)
 
     # augment input using sigmas
     X_train_sr = np.zeros((X_sr.shape[0], len(sigmas_sr)), dtype=np.float32)
