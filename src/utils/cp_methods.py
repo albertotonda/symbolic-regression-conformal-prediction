@@ -7,23 +7,25 @@ def fit_difficulty_estimator(X_prop_train : np.ndarray,
                             type : str,
                             oob : bool = False,
                             y_prop_train : np.ndarray = None,
-                            learner_prop = None) -> DifficultyEstimator:
+                            learner_prop = None,
+                            k : int = 25) -> DifficultyEstimator:
     """
-    Fit the difficulty estimator depending on type
+    Fit the difficulty estimator depending on type. k is the number of
+    neighbors for the KNN-based types.
     """
     de = DifficultyEstimator()
     match type:
         case "knn_dist":
-            de.fit(X=X_prop_train, scaler=True, oob=oob)
+            de.fit(X=X_prop_train, k=k, scaler=True, oob=oob)
         case "knn_std":
             assert y_prop_train is not None
-            de.fit(X=X_prop_train, y=y_prop_train, scaler=True, oob=oob)
+            de.fit(X=X_prop_train, y=y_prop_train, k=k, scaler=True, oob=oob)
         case "knn_res":
             assert y_prop_train is not None
             assert learner_prop is not None
             y_pred_oob = learner_prop.oob_prediction_
             residuals_prop_oob = y_prop_train - y_pred_oob
-            de.fit(X=X_prop_train, residuals=residuals_prop_oob, scaler=True, oob=oob)
+            de.fit(X=X_prop_train, residuals=residuals_prop_oob, k=k, scaler=True, oob=oob)
         case "var":
             assert learner_prop is not None
             de.fit(X=X_prop_train, learner=learner_prop, scaler=True, oob=oob)

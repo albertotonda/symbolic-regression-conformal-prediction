@@ -110,7 +110,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
     # de.apply(X) on a real X doesn't depend on the oob flag for KNN-based methods, so a
     # single fit serves both the intervals and augmentation.
     augment_knn_dist = config.data_augmentation.sigma_knn_dist
-    de_knn_dist = fit_difficulty_estimator(X_prop_train, "knn_dist", oob=augment_knn_dist and use_oob)
+    de_knn_dist = fit_difficulty_estimator(X_prop_train, "knn_dist", oob=augment_knn_dist and use_oob, k=config.ncp_knn_k)
     conf_intervals["knn_dist"], _, sigmas_test["knn_dist"] = compute_normalized_intervals(de_knn_dist, learner_prop, X_cal_cp, y_cal_cp, X_test, config.confidence)
     sigmas_cal["knn_dist"] = de_knn_dist.apply(X_cal)
     if augment_knn_dist:
@@ -118,7 +118,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
 
     # KNN std
     augment_knn_std = config.data_augmentation.sigma_knn_std
-    de_knn_std = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train, oob=augment_knn_std and use_oob)
+    de_knn_std = fit_difficulty_estimator(X_prop_train, "knn_std", y_prop_train=y_prop_train, oob=augment_knn_std and use_oob, k=config.ncp_knn_k)
     conf_intervals["knn_std"], _, sigmas_test["knn_std"] = compute_normalized_intervals(de_knn_std, learner_prop, X_cal_cp, y_cal_cp, X_test, config.confidence)
     sigmas_cal["knn_std"] = de_knn_std.apply(X_cal)
     if augment_knn_std:
@@ -127,7 +127,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
     if is_forest:
         # KNN out-of-bag residuals
         augment_knn_res = config.data_augmentation.sigma_knn_res and use_oob
-        de_knn_res = fit_difficulty_estimator(X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop, oob=augment_knn_res)
+        de_knn_res = fit_difficulty_estimator(X_prop_train, "knn_res", y_prop_train=y_prop_train, learner_prop=learner_prop, oob=augment_knn_res, k=config.ncp_knn_k)
         conf_intervals["knn_res"], _, sigmas_test["knn_res"] = compute_normalized_intervals(de_knn_res, learner_prop, X_cal_cp, y_cal_cp, X_test, config.confidence)
         sigmas_cal["knn_res"] = de_knn_res.apply(X_cal)
         if augment_knn_res:

@@ -36,3 +36,17 @@ def test_normalized_intervals_match_wrap_regressor():
     wrapped = WrapRegressor(learner)
     wrapped.calibrate(X[100:200], y[100:200], de=de)
     assert np.allclose(intervals, wrapped.predict_int(X[200:], confidence=0.9))
+
+
+def test_knn_estimator_uses_k():
+    from crepes.extras import DifficultyEstimator
+    from utils.cp_methods import fit_difficulty_estimator
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 3))
+    y = X[:, 0] + rng.normal(size=200)
+    X_new = rng.normal(size=(50, 3))
+    de_5 = fit_difficulty_estimator(X, "knn_std", y_prop_train=y, k=5)
+    de_ref = DifficultyEstimator().fit(X=X, y=y, k=5, scaler=True)
+    assert np.allclose(de_5.apply(X_new), de_ref.apply(X_new))
+    de_25 = fit_difficulty_estimator(X, "knn_std", y_prop_train=y, k=25)
+    assert not np.allclose(de_5.apply(X_new), de_25.apply(X_new))
