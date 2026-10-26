@@ -26,7 +26,23 @@ if run_path is None:
         st.stop()
     run_path = runs[0]["path"]
     st.warning(f"No run selected on the Home page — defaulting to `{runs[0]['name']}`.")
+data.show_results_folder(run_path)
 
+st.subheader("All datasets")
+overview = data.load_dataset_overview(run_path)
+st.dataframe(
+    overview, width="stretch", hide_index=True,
+    column_config={
+        "Test R² (this run)": st.column_config.NumberColumn(format="%.3f"),
+        "CV R² (RF, OpenML)": st.column_config.NumberColumn(format="%.2f"),
+    },
+)
+st.caption(
+    "Size and feature columns come from the OpenML-CTR23 metadata table (blank for "
+    "datasets not in it); split sizes and test R² come from this run."
+)
+
+st.subheader("Single dataset")
 all_datasets = sorted(data.load_results(run_path)["dataset_name"].unique())
 dataset = st.selectbox("Dataset", options=all_datasets, key="dataset_analysis_dataset")
 

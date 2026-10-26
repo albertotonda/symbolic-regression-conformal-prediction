@@ -48,6 +48,19 @@ if not (Path(run_path) / "results.csv").exists():
 
 st.session_state["run_path"] = run_path
 st.caption(f"Reading from `{run_path}`")
+
+# Which Hall of Fame equation stands for each SR method on every page;
+# copied to its own session key like run_path so other pages can read it
+selection = st.selectbox(
+    "SR equation",
+    options=list(data.SR_SELECTIONS),
+    format_func=data.SR_SELECTIONS.get,
+    index=list(data.SR_SELECTIONS).index(data.sr_selection()),
+    key="sr_selection_select",
+    help="PySR's `model_selection`: *accuracy* is the lowest-loss equation, the one the experiment keeps; "
+         "*score* and *best* favour simpler equations.",
+)
+st.session_state["sr_selection"] = selection
 st.info("Pick a run above, then open a plot from the sidebar.")
 
 df = data.load_results(run_path)

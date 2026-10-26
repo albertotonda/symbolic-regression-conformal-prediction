@@ -24,6 +24,7 @@ if run_path is None:
         st.stop()
     run_path = runs[0]["path"]
     st.warning(f"No run selected on the Home page — defaulting to `{runs[0]['name']}`.")
+data.show_results_folder(run_path)
 
 all_datasets = sorted(data.load_results(run_path)["dataset_name"].unique())
 losses_by_dataset = {ds: data.discover_losses(run_path, ds) for ds in all_datasets}

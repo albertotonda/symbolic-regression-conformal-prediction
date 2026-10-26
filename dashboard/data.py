@@ -10,18 +10,21 @@ than assumed from a fixed schema.
 
 import colorsys
 import hashlib
+import re
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+import sympy
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import method_stats  # noqa: E402
 from src.utils.plotting import translations  # noqa: E402
 
 # A categorical palette independent of src/utils/plotting.py's, sized for
@@ -62,6 +65,11 @@ LEGEND_MARGIN = 180  # vertical space above a grid for the shared legend, clear 
 DETAIL_SIZE = 860  # px, single-item detail/full-size view
 
 
+def show_results_folder(run_path: str) -> None:
+    """Caption naming the results folder a page reads from."""
+    st.caption(f"Results folder: `{Path(run_path).name}`")
+
+
 def discover_runs() -> list[dict]:
     """List results-* run folders that contain a results.csv, newest first."""
     runs = []
@@ -80,10 +88,22 @@ def discover_runs() -> list[dict]:
     return runs
 
 
-@st.cache_data
 def load_results(run_path: str) -> pd.DataFrame:
-    """Load a run's results.csv (one row per dataset)."""
-    return pd.read_csv(Path(run_path) / "results.csv")
+    """Load a run's results.csv (one row per dataset), with each SR method's
+    columns taken from the Hall of Fame equation picked by `sr_selection()`."""
+    return _load_results(run_path, sr_selection())
+
+
+@st.cache_data
+def _load_results(run_path: str, selection: str) -> pd.DataFrame:
+    df = pd.read_csv(Path(run_path) / "results.csv")
+    for i, name in df["dataset_name"].items():
+        for method, complexity in _sr_swaps(run_path, name, selection).items():
+            hof = load_hof(run_path, name, method[len("sr_"):])
+            for suffix, column in [("mean", "ci_mean"), ("median", "ci_median"), ("coverage", "coverage")]:
+                if f"{method}_{suffix}" in df.columns:
+                    df.loc[i, f"{method}_{suffix}"] = hof.loc[complexity, column]
+    return df
 
 
 def discover_methods(df: pd.DataFrame) -> list[str]:
@@ -164,17 +184,57 @@ def load_calibration_data(run_path: str, dataset_name: str) -> pd.DataFrame | No
     return pd.read_csv(path, index_col="index")
 
 
-@st.cache_data
 def load_intervals(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     """Long-format (method, index, lower_bound, upper_bound) for every
-    method on this dataset's test set."""
+    method on this dataset's test set, SR methods following `sr_selection()`."""
+    return _load_intervals(run_path, dataset_name, sr_selection())
+
+
+@st.cache_data
+def _load_intervals(run_path: str, dataset_name: str, selection: str) -> pd.DataFrame | None:
     path = _per_point_source_files(run_path, dataset_name)["intervals"]
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    intervals = pd.read_csv(path)
+    for method, complexity in _sr_swaps(run_path, dataset_name, selection).items():
+        hof_path = Path(run_path) / dataset_name / f"hof_intervals_{method[len('sr_'):]}.csv"
+        if not hof_path.exists():
+            continue
+        hof = pd.read_csv(hof_path)
+        replacement = hof[hof["complexity"] == complexity].drop(columns="complexity").assign(method=method)
+        intervals = pd.concat([intervals[intervals["method"] != method], replacement[intervals.columns]],
+                              ignore_index=True)
+    return intervals
 
 
-@st.cache_data
+def _load_sigmas(run_path: str, dataset_name: str, split: str, selection: str) -> pd.DataFrame:
+    """`methods_sigmas_<split>.csv` (split = "test" or "cal"), with each SR
+    method's column taken from the selected Hall of Fame equation."""
+    dataset_dir = Path(run_path) / dataset_name
+    sigmas = pd.read_csv(dataset_dir / f"methods_sigmas_{split}.csv", index_col="index")
+    for method, complexity in _sr_swaps(run_path, dataset_name, selection).items():
+        hof_path = dataset_dir / f"hof_sigmas_{split}_{method[len('sr_'):]}.csv"
+        if method in sigmas.columns and hof_path.exists():
+            sigmas[method] = pd.read_csv(hof_path, index_col="index")[str(complexity)]
+    return sigmas
+
+
+def load_method_stats(run_path: str) -> pd.DataFrame:
+    """`method_stats.dataset_stats` for every dataset in a run with
+    `testing_data.csv` + `methods_intervals.csv`, stacked into one long
+    table with `dataset_name` and `method` columns. Not cached itself
+    (st.cache_data wouldn't notice edits to method_stats.py); the CSV
+    loads it relies on are."""
+    alpha = 1 - target_coverage(run_path)
+    frames = []
+    for name in sorted(load_results(run_path)["dataset_name"].unique()):
+        if not has_interval_detail_data(run_path, name):
+            continue
+        stats = method_stats.dataset_stats(load_testing_data(run_path, name), load_intervals(run_path, name), alpha)
+        frames.append(stats.rename_axis("method").reset_index().assign(dataset_name=name))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def load_per_point(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     """Per-test-point sigma/width/coverage per method + the base
     regressor's absolute residual, for one dataset.
@@ -192,8 +252,14 @@ def load_per_point(run_path: str, dataset_name: str) -> pd.DataFrame | None:
       shared `index` column.
 
     Returns None if neither format is present, so callers can show a
-    clear "not available" state instead of crashing.
+    clear "not available" state instead of crashing. SR methods follow
+    `sr_selection()` (current format only).
     """
+    return _load_per_point(run_path, dataset_name, sr_selection())
+
+
+@st.cache_data
+def _load_per_point(run_path: str, dataset_name: str, selection: str) -> pd.DataFrame | None:
     paths = _per_point_source_files(run_path, dataset_name)
 
     if paths["legacy"].exists():
@@ -203,8 +269,8 @@ def load_per_point(run_path: str, dataset_name: str) -> pd.DataFrame | None:
         return None
 
     testing = pd.read_csv(paths["testing"], index_col="index")
-    sigmas = pd.read_csv(paths["sigmas"], index_col="index")
-    intervals = pd.read_csv(paths["intervals"])
+    sigmas = _load_sigmas(run_path, dataset_name, "test", selection)
+    intervals = _load_intervals(run_path, dataset_name, selection)
 
     df = pd.DataFrame(index=testing.index)
     df["abs_residual"] = testing["residuals"].abs()
@@ -226,7 +292,6 @@ def has_calibration_per_point_data(run_path: str, dataset_name: str) -> bool:
     return (dataset_dir / "calibration_data.csv").exists() and (dataset_dir / "methods_sigmas_cal.csv").exists()
 
 
-@st.cache_data
 def load_per_point_calibration(run_path: str, dataset_name: str) -> pd.DataFrame | None:
     """Per-calibration-point sigma + the base regressor's absolute residual,
     for one dataset -- the calibration-side counterpart of `load_per_point`.
@@ -235,8 +300,14 @@ def load_per_point_calibration(run_path: str, dataset_name: str) -> pd.DataFrame
     never gets its own prediction interval), so only `sigma_<method>` and
     `abs_residual` exist here. Only supports the current
     (`calibration_data.csv` + `methods_sigmas_cal.csv`) format -- there's no
-    calibration-side equivalent of the older `per_point.csv`.
+    calibration-side equivalent of the older `per_point.csv`. SR methods
+    follow `sr_selection()`.
     """
+    return _load_per_point_calibration(run_path, dataset_name, sr_selection())
+
+
+@st.cache_data
+def _load_per_point_calibration(run_path: str, dataset_name: str, selection: str) -> pd.DataFrame | None:
     dataset_dir = Path(run_path) / dataset_name
     cal_path = dataset_dir / "calibration_data.csv"
     sigmas_path = dataset_dir / "methods_sigmas_cal.csv"
@@ -244,7 +315,7 @@ def load_per_point_calibration(run_path: str, dataset_name: str) -> pd.DataFrame
         return None
 
     calibration = pd.read_csv(cal_path, index_col="index")
-    sigmas = pd.read_csv(sigmas_path, index_col="index")
+    sigmas = _load_sigmas(run_path, dataset_name, "cal", selection)
 
     df = pd.DataFrame(index=calibration.index)
     df["abs_residual"] = calibration["residuals"].abs()
@@ -299,6 +370,91 @@ def load_hof(run_path: str, dataset_name: str, loss_name: str) -> pd.DataFrame |
     if not path.exists():
         return None
     return pd.read_csv(path, index_col="Complexity")
+
+
+def n_features_used(equation: str) -> int:
+    """Number of distinct input features (`x0`, `x1`, ...) in a PySR
+    equation string."""
+    return len(set(re.findall(r"\bx\d+\b", equation)))
+
+
+# logm(u) = log(|u| + 1e-8) in the SR config; the 1e-8 is dropped so that
+# exp(c * logm(u)) displays as |u|**c
+_SYMPY_LOCALS = {"logm": lambda u: sympy.log(sympy.Abs(u))}
+
+
+@st.cache_data
+def difficulty_equation(equation: str, digits: int = 4) -> str:
+    """Difficulty score sigma = exp(equation) for a PySR equation (which
+    predicts log sigma), simplified for display: top-level constants become
+    a factor e^c, top-level c*log(u) terms become u**c, and every other term
+    stays inside one exp(...). Floats are rounded to `digits` significant
+    digits."""
+    expr = sympy.expand(sympy.sympify(equation, locals=_SYMPY_LOCALS),
+                        power_exp=False, power_base=False, log=False)
+    factor, rest = sympy.Integer(1), []
+    for term in sympy.Add.make_args(expr):
+        coeff, body = term.as_coeff_Mul()
+        if body == 1:
+            factor *= sympy.exp(coeff)
+        elif isinstance(body, sympy.log):
+            factor *= body.args[0] ** coeff
+        else:
+            rest.append(term)
+    sigma = factor * sympy.exp(sympy.Add(*rest))
+    return str(sigma.xreplace({f: sympy.Float(f, digits) for f in sigma.atoms(sympy.Float)}))
+
+
+def pysr_selections(hof: pd.DataFrame) -> dict[str, int]:
+    """Complexity PySR's `get_best` would pick under each `model_selection`
+    strategy, mirroring `pysr.sr.idx_model_selection`/`calculate_scores`.
+    Score is -d(log loss)/d(complexity) between consecutive HoF entries (0
+    for the simplest); "score" takes the max score, "best" the max score
+    among losses <= 1.5x the minimum, "accuracy" the minimum loss."""
+    hof = hof.sort_index()
+    loss = hof["Loss"].to_numpy(dtype=float)
+    complexity = hof.index.to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        score = -np.log(loss[1:] / loss[:-1]) / np.diff(complexity)
+    score = np.where(loss[1:] > 0, score, np.inf)
+    score = pd.Series(np.concatenate([[0.0], score]), index=hof.index)
+    near_best = hof["Loss"] <= 1.5 * hof["Loss"].min()
+    return {
+        "accuracy": int(hof["Loss"].idxmin()),
+        "score": int(score.idxmax()),
+        "best": int(score[near_best].idxmax()),
+    }
+
+
+# PySR `model_selection` strategies offered for the SR methods, as labels
+SR_SELECTIONS = {
+    "accuracy": "accuracy (lowest loss)",
+    "score": "score (largest loss drop per complexity)",
+    "best": "best (largest score among losses ≤ 1.5× min)",
+}
+
+
+def sr_selection() -> str:
+    """The SR equation selection picked on the Home page; "accuracy" by
+    default, which is the equation the experiment itself keeps."""
+    return st.session_state.get("sr_selection", "accuracy")
+
+
+@st.cache_data
+def _sr_swaps(run_path: str, dataset_name: str, selection: str) -> dict[str, int]:
+    """SR methods (`sr_<loss>`) whose selected Hall of Fame equation is not
+    the one the run saved in results.csv/methods_*.csv (its `Chosen` row),
+    mapped to the selected equation's complexity."""
+    swaps = {}
+    for loss in discover_losses(run_path, dataset_name):
+        hof = load_hof(run_path, dataset_name, loss)
+        if hof is None or hof.empty:
+            continue
+        complexity = pysr_selections(hof)[selection]
+        chosen = hof.index[hof["Chosen"].astype(bool)] if "Chosen" in hof.columns else []
+        if complexity not in chosen:
+            swaps[f"sr_{loss}"] = complexity
+    return swaps
 
 
 def has_hof_per_point_data(run_path: str, dataset_name: str, loss_name: str) -> bool:
@@ -366,6 +522,41 @@ def load_dataset_characteristics() -> pd.DataFrame:
         if col.startswith("R2_") or col.startswith("MSE_"):
             df[col] = df[col].astype(str).str.split(" +/- ", regex=False).str[0].astype(float)
     return df
+
+
+@st.cache_data
+def load_dataset_overview(run_path: str) -> pd.DataFrame:
+    """One row per dataset in a run: OpenML-CTR23 metadata (target, size,
+    feature types, CV R2 of a random forest) next to this run's own split
+    sizes and base-regressor test R2. Metadata columns are NaN for datasets
+    not in the CTR23 table."""
+    results = load_results(run_path)
+    characteristics = load_dataset_characteristics()
+    overview = results[["dataset_name"] + (["r2"] if "r2" in results.columns else [])].merge(
+        characteristics, on="dataset_name", how="left"
+    )
+    overview["n_calibration"] = [
+        len(df) if (df := load_calibration_data(run_path, name)) is not None else None
+        for name in overview["dataset_name"]
+    ]
+    overview["n_test"] = [
+        len(df) if (df := load_testing_data(run_path, name)) is not None else None
+        for name in overview["dataset_name"]
+    ]
+    columns = {
+        "dataset_name": "Dataset",
+        "target_name": "Target",
+        "n_samples": "n samples",
+        "n_features": "n features",
+        "categorical_features": "Categorical features",
+        "missing_data": "Missing values",
+        "n_calibration": "n calibration",
+        "n_test": "n test",
+        "r2": "Test R² (this run)",
+        "R2_RandomForestRegressor": "CV R² (RF, OpenML)",
+    }
+    overview = overview[[c for c in columns if c in overview.columns]].rename(columns=columns)
+    return overview.sort_values("Dataset").reset_index(drop=True)
 
 
 @st.cache_data(show_spinner="Fetching dataset description from OpenML…")

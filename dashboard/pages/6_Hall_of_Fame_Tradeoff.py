@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
 """Hall-of-Fame analysis: everything the SR search's final complexity/loss
-Pareto front looked like for one dataset/loss, across five tabs --
+Pareto front looked like for one dataset/loss, across seven tabs --
 
+- Equations: the full Hall of Fame table (equation, loss, chosen flag,
+  coverage and interval widths), one row per complexity.
 - Pareto: every equation scattered by (coverage, interval width),
   colored by complexity, chosen one highlighted -- does the chosen
   equation actually sit at a good point of the trade-off?
+- Complexity vs Loss: the SR search's own Pareto front (training loss vs.
+  complexity), one subplot per dataset for the selected loss, chosen
+  equation highlighted, plus the equations PySR's model_selection="score"
+  and "best" would pick -- where does the loss stop dropping?
 - Conditional Coverage: same per-equation small multiples, sliding-window
   empirical coverage along a selectable x-axis (y_pred or own sigma),
   then mean width vs. worst-group coverage per equation (y_pred bins or
@@ -45,6 +51,7 @@ import data  # noqa: E402
 
 N_DECILES = 10
 N_BINS = 15
+SELECTION_COLORS = {"score": "#d62728", "best": "#2ca02c"}
 COVERAGE_COLORSCALE = [
     [0.0, "#2b6bab"],
     [0.5, "#ffffff"],
@@ -61,6 +68,7 @@ if run_path is None:
         st.stop()
     run_path = runs[0]["path"]
     st.warning(f"No run selected on the Home page — defaulting to `{runs[0]['name']}`.")
+data.show_results_folder(run_path)
 
 all_datasets = sorted(data.load_results(run_path)["dataset_name"].unique())
 datasets_with_hof = [ds for ds in all_datasets if data.discover_losses(run_path, ds)]
@@ -97,9 +105,21 @@ def panel_title(c):
     return f"C{c} ★" if c == chosen_complexity else f"C{c}"
 
 
-tab_tradeoff, tab_outcome, tab_width_resid, tab_coverage, tab_heatmap = st.tabs(
-    ["Pareto", "Conditional Coverage", "Interval Width", "Sigma vs Residuals", "Coverage per Decile"]
+tab_equations, tab_tradeoff, tab_loss_front, tab_coverage, tab_width_resid, tab_outcome, tab_heatmap = st.tabs(
+    ["Equations", "Pareto", "Complexity vs Loss", "Conditional Coverage", "Interval Width",
+     "Sigma vs Residuals", "Coverage per Decile"]
 )
+
+with tab_equations:
+    df_table = df_hof.assign(**{
+        "Difficulty score": df_hof["Equation"].map(data.difficulty_equation),
+        "Number of features used": df_hof["Equation"].map(data.n_features_used),
+    })
+    st.dataframe(
+        df_table[["Loss", "Equation", "Difficulty score", "Number of features used", "Chosen", "coverage",
+                  "ci_median", "ci_mean"]].sort_index(),
+        width="stretch",
+    )
 
 with tab_tradeoff:
     metric = st.radio("Width", options=["ci_median", "ci_mean"], key="hof_metric")
@@ -149,11 +169,66 @@ with tab_tradeoff:
     )
     st.plotly_chart(fig, width="content")
 
-    with st.expander("Full Hall of Fame table", expanded=False):
-        st.dataframe(
-            df_hof[["Loss", "Equation", "Chosen", "coverage", "ci_median", "ci_mean"]].sort_index(),
-            width="stretch",
+with tab_loss_front:
+    # every dataset that has a HoF for the selected loss, not just the one
+    # picked above
+    front_datasets = [ds for ds in datasets_with_hof if loss_name in data.discover_losses(run_path, ds)]
+    log_y = st.checkbox("Log-scale loss", value=True, key="hof_front_log_y")
+    line_color = data.method_color(f"sr_{loss_name}")
+
+    cols = min(3, len(front_datasets))
+    rows = math.ceil(len(front_datasets) / cols)
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=front_datasets)
+    for i, ds in enumerate(front_datasets):
+        row, col = i // cols + 1, i % cols + 1
+        hof = data.load_hof(run_path, ds, loss_name).sort_index()
+        chosen = hof["Chosen"].astype(bool)
+        customdata = list(zip(hof["Equation"], hof["coverage"], hof["ci_median"]))
+        hovertemplate = (
+            "complexity=%{x}<br>loss=%{y:.4g}<br>coverage=%{customdata[1]:.3f}<br>"
+            "ci_median=%{customdata[2]:.3f}<br>%{customdata[0]}<extra>" + ds + "</extra>"
         )
+        # the HoF is a staircase: each equation is the best loss up to the
+        # next complexity
+        fig.add_trace(go.Scatter(
+            x=hof.index, y=hof["Loss"], mode="lines+markers", line_shape="hv",
+            line=dict(color=line_color, width=2), marker=dict(size=7, color=line_color),
+            customdata=customdata, hovertemplate=hovertemplate,
+            name="Equations", legendgroup="eq", showlegend=i == 0,
+        ), row=row, col=col)
+        if chosen.any():
+            fig.add_trace(go.Scatter(
+                x=hof.index[chosen], y=hof.loc[chosen, "Loss"], mode="markers",
+                marker=dict(size=16, symbol="star", color=line_color, line=dict(width=1.5, color="black")),
+                customdata=[c for c, m in zip(customdata, chosen) if m],
+                hovertemplate="<b>Chosen</b><br>" + hovertemplate,
+                name="Chosen equation (run)", legendgroup="chosen", showlegend=i == 0,
+            ), row=row, col=col)
+        # concentric open circles so both stay visible when they land on the same point
+        selections = data.pysr_selections(hof)
+        for mode, symbol, size in [("score", "circle-open", 20), ("best", "circle-open", 30)]:
+            c = selections[mode]
+            fig.add_trace(go.Scatter(
+                x=[c], y=[hof.loc[c, "Loss"]], mode="markers",
+                marker=dict(size=size, symbol=symbol, color=SELECTION_COLORS[mode], line=dict(width=2.5)),
+                customdata=[customdata[hof.index.get_loc(c)]],
+                hovertemplate=f"<b>model_selection=\"{mode}\"</b><br>" + hovertemplate,
+                name=f'model_selection="{mode}"', legendgroup=mode, showlegend=i == 0,
+            ), row=row, col=col)
+        fig.update_xaxes(title="Complexity", row=row, col=col)
+        fig.update_yaxes(title="Loss", type="log" if log_y else "linear", row=row, col=col)
+
+    # title and legend both sit in the top margin, placed in pixels from
+    # the top (container coordinates) so they never overlap
+    height = rows * data.CELL_SIZE + data.LEGEND_MARGIN
+    fig.update_layout(
+        width=cols * data.CELL_SIZE, height=height,
+        margin=dict(t=data.LEGEND_MARGIN),
+        title=dict(text=f"Complexity vs. loss — {data.method_label(f'sr_{loss_name}')}",
+                   yref="container", y=1 - 15 / height, yanchor="top"),
+        legend=dict(orientation="h", yref="container", y=1 - 60 / height, yanchor="top", x=0),
+    )
+    st.plotly_chart(fig, width="content")
 
 has_per_point = data.has_hof_per_point_data(run_path, dataset, loss_name)
 if not has_per_point:

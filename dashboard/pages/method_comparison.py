@@ -4,10 +4,10 @@ Hall of Fame's one-page/many-tabs layout instead of one page per view).
 
 A single **Dataset** selector above the tabs drives every per-dataset tab
 (Sigma vs Residuals, Interval Width, Confidence Intervals, Conditional
-Coverage, and Pareto's Detail view) -- pick it once instead of on each tab
-separately. Pareto's Grid view, Coverage per Decile, and Dataset
-Characteristics are inherently cross-dataset (every dataset at once) and
-ignore it. Target-variable/
+Coverage, Pareto's Detail view, and Statistics' per-dataset table) -- pick it
+once instead of on each tab separately. Pareto's Grid view, Coverage per
+Decile, Dataset Characteristics, and Statistics' summary table are
+inherently cross-dataset (every dataset at once) and ignore it. Target-variable/
 prediction/residual distributions for one dataset live on their own
 "Dataset Analysis" page instead of a tab here.
 
@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import conditional_coverage as cc  # noqa: E402
 import conditional_coverage_view  # noqa: E402
 import interval_width_view  # noqa: E402
+import method_stats  # noqa: E402
 import data  # noqa: E402
 
 st.title("Method comparison")
@@ -48,6 +49,8 @@ if run_path is None:
         st.stop()
     run_path = runs[0]["path"]
     st.warning(f"No run selected on the Home page — defaulting to `{runs[0]['name']}`.")
+data.show_results_folder(run_path)
+st.caption(f"SR equation: {data.SR_SELECTIONS[data.sr_selection()]} (change it on the Home page)")
 
 results_df = data.load_results(run_path)
 all_datasets = sorted(results_df["dataset_name"].unique())
@@ -59,17 +62,17 @@ dataset = st.selectbox(
     key="mc_dataset",
     help=(
         "Used by every per-dataset tab (Sigma vs Residuals, Interval Width, "
-        "Confidence Intervals, Conditional Coverage, and Pareto's Detail view). Pareto's Grid view, Difficulty "
-        "Heatmap, and Dataset Characteristics always show every dataset "
-        "regardless of this."
+        "Confidence Intervals, Conditional Coverage, Pareto's Detail view, and Statistics' per-dataset "
+        "table). Pareto's Grid view, Coverage per Decile, Dataset Characteristics, and Statistics' "
+        "summary always show every dataset regardless of this."
     ),
 )
 
 (
-    tab_pareto, tab_sigma_rel, tab_width_rank, tab_heatmap,
-    tab_characteristics, tab_ci, tab_sigma_cov,
+    tab_pareto, tab_stats, tab_sigma_cov, tab_width_rank, tab_sigma_rel, tab_heatmap,
+    tab_characteristics, tab_ci,
 ) = st.tabs([
-    "Pareto", "Conditional Coverage", "Interval Width", "Sigma vs Residuals", "Coverage per Decile",
+    "Pareto", "Statistics", "Conditional Coverage", "Interval Width", "Sigma vs Residuals", "Coverage per Decile",
     "Dataset Characteristics", "Confidence Intervals",
 ])
 
@@ -158,6 +161,96 @@ with tab_pareto:
             st.plotly_chart(fig, width="content")
 
     _render_pareto()
+
+# ---------------------------------------------------------------------------
+# Statistics: width rank among valid methods, width and Winkler score,
+# width-coverage correlation; see method_stats.py.
+# ---------------------------------------------------------------------------
+with tab_stats:
+    def _render_statistics():
+        stats = data.load_method_stats(run_path)
+        if stats.empty:
+            st.info(
+                "No dataset in this run has `testing_data.csv` + `methods_intervals.csv`, "
+                "which these statistics need. Select a newer run."
+            )
+            return
+
+        alpha = 1 - target_coverage
+        order = data.discover_methods(results_df)
+        order += sorted(set(stats["method"]) - set(order))
+        number = st.column_config.NumberColumn
+
+        st.markdown("**Summary across datasets**")
+        n_included = stats["dataset_name"].nunique()
+        if n_included < len(all_datasets):
+            st.caption(f"{n_included}/{len(all_datasets)} datasets included (the rest have no per-point intervals).")
+        summary = method_stats.summarize(stats)
+        summary = summary.reindex([m for m in order if m in summary.index])
+        summary = summary.sort_values("mean_rank", na_position="last")
+        summary.index = [data.method_label(m) for m in summary.index]
+        st.dataframe(
+            summary.rename(columns={
+                "n_datasets": "Datasets", "n_valid": "Valid on", "mean_rank": "Mean rank",
+                "median_rank": "Median rank", "mean_width": "Mean width", "median_width": "Median width",
+                "winkler": "Mean Winkler", "median_winkler": "Median Winkler",
+                "width_coverage_corr": "Corr(width, covered)",
+            }),
+            width="stretch",
+            column_config={
+                "Mean rank": number(format="%.2f"), "Median rank": number(format="%.1f"),
+                "Mean width": number(format="%.3f"), "Median width": number(format="%.3f"),
+                "Mean Winkler": number(format="%.3f"), "Median Winkler": number(format="%.3f"),
+                "Corr(width, covered)": number(format="%.3f"),
+            },
+        )
+        st.caption(
+            f"""
+- **Valid on**: number of datasets where coverage is within 2 standard errors of the target
+  ({1 - alpha:.2f} ± 2·√(α(1−α)/n_test)).
+- **Mean / median rank** (lower is better): rank by median width among the valid methods of a dataset,
+  1 = narrowest, then mean / median over the datasets where the method is valid.
+- **Width** (lower is better): in units of y, which is z-scored per dataset.
+- **Winkler** (lower is better): width + {2 / alpha:.0f} × distance by which y falls outside the interval.
+  Combines width and misses, and rewards adaptive intervals.
+- **Mean / median width and Winkler**: mean / median over the test points of each dataset, then the
+  **median over datasets**, so one dataset with a few huge intervals can't dominate.
+- **Corr(width, covered)** (closer to 0 is better): correlation between width and being covered,
+  averaged over datasets. Positive = wide intervals over-cover and narrow ones under-cover.
+  Blank for constant-width methods, and blind to miscoverage in directions where the width doesn't vary.
+"""
+        )
+
+        st.markdown(f'**Selected dataset: "{dataset}"**')
+        selected = stats[stats["dataset_name"] == dataset].set_index("method")
+        if selected.empty:
+            st.info(f'No per-point intervals for "{dataset}".')
+            return
+        selected = selected.reindex([m for m in order if m in selected.index]).sort_values(
+            "width_rank", na_position="last")
+        selected.index = [data.method_label(m) for m in selected.index]
+        n_test = len(data.load_testing_data(run_path, dataset))
+        st.dataframe(
+            selected[["coverage", "valid", "width_rank", "median_width", "mean_width", "median_winkler",
+                      "winkler", "width_coverage_corr"]].rename(columns={
+                "coverage": "Coverage", "valid": "Valid", "width_rank": "Rank", "median_width": "Median width",
+                "mean_width": "Mean width", "median_winkler": "Median Winkler", "winkler": "Mean Winkler",
+                "width_coverage_corr": "Corr(width, covered)",
+            }),
+            width="stretch",
+            column_config={
+                "Coverage": number(format="%.3f"), "Rank": number(format="%.1f"),
+                "Median width": number(format="%.3f"), "Mean width": number(format="%.3f"),
+                "Median Winkler": number(format="%.3f"), "Mean Winkler": number(format="%.3f"),
+                "Corr(width, covered)": number(format="%.3f"),
+            },
+        )
+        st.caption(
+            f"n_test = {n_test}: valid coverage range is {1 - alpha:.2f} ± "
+            f"{method_stats.coverage_tolerance(n_test, alpha):.3f}."
+        )
+
+    _render_statistics()
 
 # ---------------------------------------------------------------------------
 # Sigma vs. residuals/width: raw per-point scatter plus the binned
