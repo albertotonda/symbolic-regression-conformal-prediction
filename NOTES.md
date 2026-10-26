@@ -7,8 +7,44 @@
 4. Idea to fix the theoretical miscoverage of the direct confidence bounds regression using symbolic regression: instead of directly predicting confidence bounds, predict difficulty estimation and calibrate on calibration set. Problem: difficulty estimator cannot be trained on the same training set as base regressor. Two ideas:
     * For large datasets, split into two sets (80/20 for example), train base regressor on 80% and difficulty estimator on 20%. Optionally, retrain base regressor after using 100% of data. Note: sigmas used in SR training and comparison are not the same (first are sigmas on 80% of data, second on 100%).
     * For Random Forests: use "free" data from OOB predictions to train difficulty estimator. Use all sigmas from OOB predictions for SR training, and full base predictor for comparison.
+5. Separate the "level effect" from the rest of the difficulty (not started, still under discussion). In `results-sigma-sr-42-base`, the SR sigma is strongly tied to the predicted value: median |Spearman(sigma, y_pred)| ≈ 0.5 on the test split, up to 0.95+ on fifa/diamonds, vs ≈ 0.2 with `knn_dist`. The SR mostly finds the feature that best tracks y_pred: noise proportional to the value for skewed positive targets (prices, wages, counts), smaller errors near a bound (cpu_activity, physiochemical_protein, wine grades), and RF shrinkage on extreme values.
+    * **Priority, simple option: normalized target.** Run the SR on relative residuals, log|r| − log|y_pred| (i.e. |r| / |y_pred|), and deploy sigma(x) = |y_pred| · exp(g(x)). g then reads as relative difficulty. Caveats: y_pred must be in raw units (the pipeline standardizes y, so standardized y_pred can be ≈ 0 or negative), and it suits positive targets far from 0; use |y_pred| + c as a safeguard. It assumes errors exactly proportional to the value, so it can over-correct (additive noise part, bounded targets).
+    * More general method, which doesn't depend on the target distribution:
+        * Fit a 1-D level curve h(y_pred) on the OOB residuals with the same loss: log|r| ≈ h(y_pred). Keep it simple: low-degree polynomial/spline, or PySR on y_pred alone to stay symbolic.
+        * Run the SR on log|r| − h(y_pred), on the features as now → g(x).
+        * Deploy sigma(x) = exp(h(y_pred) + g(x)); calibration and coverage unchanged.
+        * h adapts: increasing for skewed targets, shrinking near a bound, flat when there's no level effect (then it reduces to the current method). y_pred stays standardized, so no division by y_pred.
+        * Reading: h = how difficulty depends on the predicted value, g = what the features add on top. Comparing the loss explained by h vs g measures per dataset how "level-driven" difficulty is.
+    * Alternative: add y_pred as an extra SR input (simpler, but h and g end up mixed in one equation and y_pred costs complexity).
+    * To check first (both options): subtracting log|y_pred| or h from the target only works as an offset if the custom Julia loss depends on (prediction − target) alone.
 
 ## Chronological notes
+
+### 2026-10-22 — Qualitative interpretation of the HoF equations (`results-sigma-sr-42-base`)
+
+For all 35 datasets, the PySR "score" equation and the most complex HoF equation were interpreted against the OpenML context, feature/target distributions and binned |residual| per feature decile (cal+test). Results are in `notebooks/equation_interpretation.py` (data: `notebooks/data/equation_interpretation_42_base.json`; analyses written by LLM agents, to be checked).
+
+- Score equations: all interpretable (30 yes, 5 partly); verdicts 18 expected, 14 plausible, 2 unexpected (Moneyball, pumadyn32nh), 1 unexplained (kin8nm).
+- Most complex: 11/35 not interpretable (22 partly, 2 yes); 6 expected, 15 plausible, 1 unexpected (pumadyn32nh), 2 unexplained (kin8nm, white_wine). Often adds little held-out ranking power, and sometimes less (forest_fires, geographical_origin_of_music, naval).
+- Recurring mechanisms: width follows the predicted level of a heavy-tailed target (fifa, diamonds, kings_county, cps88wages, video_transcoding); sparse regions of feature space (geo music, space_ga); bounded targets (cpu_activity, physiochemical_protein).
+- Recurring artifacts: `1/x` or `logm` on standardized categorical codes act as lookup tables that depend on the arbitrary code order (Moneyball, solar_flare, fps_benchmark, energy_efficiency); `logm` singularities create V-shapes and notches (pumadyn32nh, diamonds, white_wine).
+- Homoscedastic datasets (pumadyn32nh, Moneyball) give near-constant sigma, as they should, but SR still fits small noise shapes.
+
+### 2026-10-19 — Why use SR for NCP
+
+The main question that this project answers is: *"How to compute explainable prediction intervals for uncertainty estimation (and why)?"*. My answer to why having an expression for the prediction interval is that it gives an explainable estimate of difficulty, which is auditable, tunable, and encapsulates all kinds of noise. 
+
+A concrete example: you want to model the carbon emissions of a car depending on speed, fuel type, car size, car weight, origin of the car, etc. You use a Random Forest base regressor, to which you add conformal prediction to compute prediction intervals. You choose NCP for both the theoretical coverage guarantee and the adaptive intervals. You notice that the difficulty increases with car size, i.e. *predictions are less precise for high car sizes*. 
+
+**Your question is:** *Why should I use symbolic regression for my intervals, when you have the option to use black-box methods?*
+
+Using symbolic regression, you obtain an expression of the difficulty function like:
+$$\sigma(x)= 2+0.004 \cdot \text{car size}^2 + 4 \cdot [\text{origin}] + \log(\text{speed})$$
+Having a literal expression can have multiple advantages over other methods:
+1. **Interpretability and Auditability:** You can directly inspect how individual features drive uncertainty. This allows domain experts to challenge the relationships (ex: verifying whether carbon emission uncertainty should scale quadratically with car size) and test if they generalize to new data.
+2. **Understanding feature relationships.** The expression can capture nonlinear effects and interactions, helping us understand how prediction difficulty changes across different combinations of features. This can also suggest where additional data collection might be useful.
+3. **Flexible feature combinations.** Symbolic regression can discover functional relationships between features without requiring us to specify the complete mathematical form in advance. The effect of one feature can depend on the values of others.
+4. **Robustness via Parsimony:** Estimating prediction difficulty from residuals is a noisy task. While black-box models often overfit to this noise and yield erratic intervals, SR’s preference for simple mathematical structures provides a smoothed estimate, robust to unseen data.
 
 ### 2026-10-02
 
