@@ -30,11 +30,12 @@ data_augmentation:
     sigma_knn_res: False
     sigma_var: False
 
-loss_functions: [bin_crossfit]
+loss_functions: [pinball]
 lambda_cov : 500
 ncp_knn_k: 25
 
 sr_params:
+    model_selection: "score" # PySR choice of the HoF equation: "accuracy" (lowest loss), "score" or "best"
     npopulations: 40
     population_size: 50
     niterations: 1000
