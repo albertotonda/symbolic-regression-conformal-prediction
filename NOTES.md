@@ -20,6 +20,17 @@
 
 ## Chronological notes
 
+### 2026-10-27 — Density/outlier scores vs SR sigma (`results-sigma-sr-42-base`)
+
+Question: does the SR difficulty score just find rare regions of feature space, or does it add information? `src/run_density_comparison.py` rebuilds the run's splits, fits KDE (Scott bandwidth), Isolation Forest (200 trees), LOF (k = `ncp_knn_k`) and GMM (1–10 components by BIC) on the training features only, and computes Spearman(rarity score, sigma of the PySR "score" equation) on cal + test. Hyperparameters are standard defaults, not tuned. OC-SVM was dropped: it estimates the support, not the density inside it. Results in `density_spearman.csv` (run level) and `density_scores.csv` (per dataset).
+
+- Weak agreement overall: median Spearman KDE 0.17, GMM 0.16, Isolation Forest 0.14, LOF 0.07.
+- Strong agreement (≥ 0.5 for one method): socmob (GMM 0.79), energy_efficiency, brazilian_houses, cpu_activity, miami_housing, diamonds (GMM 0.58). There, difficulty is largely "rare points are harder".
+- Clearly negative (SR sigma higher in dense regions): superconductivity (≈ −0.65 for KDE/IF/GMM), naval_propulsion_plant (KDE −0.58), health_insurance (≈ −0.35), auction_verification (≈ −0.25). Difficulty is driven by something other than rarity (e.g. the level effect, idea 5).
+- Near zero on many datasets (grid_stability, kin8nm, cps88wages, geographical_origin_of_music, physiochemical_protein). geographical_origin_of_music was read as "sparse regions" in the 2026-10-22 interpretation, but no density method agrees.
+- KDE, Isolation Forest and GMM mostly agree with each other; LOF stays near 0, probably because it measures density relative to the neighbours rather than global rarity.
+- Next: check which features drive each score (separate experiment), and whether KDE bandwidth / GMM components change the conclusions.
+
 ### 2026-10-22 — Qualitative interpretation of the HoF equations (`results-sigma-sr-42-base`)
 
 For all 35 datasets, the PySR "score" equation and the most complex HoF equation were interpreted against the OpenML context, feature/target distributions and binned |residual| per feature decile (cal+test). Results are in `notebooks/equation_interpretation.py` (data: `notebooks/data/equation_interpretation_42_base.json`; analyses written by LLM agents, to be checked).
