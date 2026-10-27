@@ -22,5 +22,6 @@ src/*OpenML-CTR23-statistics.csv
 # Local files
 /.claude
 /tests
+/dashboard/tests
 AGENTS.md
 requirements.in
