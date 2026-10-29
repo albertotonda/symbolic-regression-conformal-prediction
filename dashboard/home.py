@@ -57,7 +57,7 @@ selection = st.selectbox(
     format_func=data.SR_SELECTIONS.get,
     index=list(data.SR_SELECTIONS).index(data.sr_selection()),
     key="sr_selection_select",
-    help="PySR's `model_selection`: *accuracy* is the lowest-loss equation, the one the experiment keeps; "
+    help="PySR's `model_selection`: *accuracy* is the most complex Hall of Fame equation; "
          "*score* and *best* favour simpler equations.",
 )
 st.session_state["sr_selection"] = selection

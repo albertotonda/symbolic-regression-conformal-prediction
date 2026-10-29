@@ -190,7 +190,7 @@ def run_single_task(dataset, task_folder, config, random_seed):
         loss_kwargs, y_train_sr = sigma_losses[loss_name]
         tb_log_dir = os.path.join(task_folder, "tb_logs", loss_name)
         sigma_predictor = PySRRegressor(
-            model_selection="accuracy", # more complex equation means more expressivity of sigma
+            model_selection=config.sr_params.model_selection, # HoF equation kept as sr_<loss>
             tournament_selection_n=15,
             populations=config.sr_params.npopulations, # default 31
             population_size=config.sr_params.population_size, # must be >= topn:=12 (default 27)
