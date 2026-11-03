@@ -20,6 +20,15 @@
 
 ## Chronological notes
 
+### 2026-11-03 — Black-box sigma baselines (Q2) and SHAP (`results-sigma-sr-42-base`)
+
+`src/run_blackbox_sigma.py` learns two black-box sigmas on the run's OOB residuals and calibrates them with NCP on the same cal set: `xgb_quantile` (XGBoost, pinball at 0.95 on log|r|, the SR's own target and loss, tuned by 5-fold CV) and `rf_abs` (RF on |r|, classic learned sigma). All methods are rescored on test, the SR one with its "score" equation (the run's "Chosen" equation is never the score one in this folder). Results in `blackbox_metrics.csv` and `blackbox_shap.csv`. 26 datasets with 0.3 ≤ R² ≤ 0.99:
+
+- Median Winkler: rf_abs 1.63, xgb_quantile 1.68, sr_score 1.84, Mondrian 1.95, var 2.07, knn_res 2.13, standard CP 2.48. Mean rank: xgb 2.0, rf_abs 2.7, SR 4.2, then the heuristics.
+- Cost of the formula: xgb_quantile has a lower Winkler than SR on 22/26 datasets (median −8.6%, median width −5.9%). SR beats it only on space_ga, QSAR, abalone. SR still beats every heuristic sigma and Mondrian on average.
+- socmob: the SR "score" equation explodes on a few test points (mean width 45 000, median 1.98), so means are unreliable there; use medians.
+- SHAP (mean |SHAP| of xgb_quantile, top-k): 28/44 SR features shared, top-1 SHAP feature in the equation on 17/26, full match 12/26. Same level as RF permutation on |r| (10/26 full, 17/26 top-1), so the agreement doesn't depend on the selector.
+
 ### 2026-10-27 — Density/outlier scores vs SR sigma (`results-sigma-sr-42-base`)
 
 Question: does the SR difficulty score just find rare regions of feature space, or does it add information? `src/run_density_comparison.py` rebuilds the run's splits, fits KDE (Scott bandwidth), Isolation Forest (200 trees), LOF (k = `ncp_knn_k`) and GMM (1–10 components by BIC) on the training features only, and computes Spearman(rarity score, sigma of the PySR "score" equation) on cal + test. Hyperparameters are standard defaults, not tuned. OC-SVM was dropped: it estimates the support, not the density inside it. Results in `density_spearman.csv` (run level) and `density_scores.csv` (per dataset).
