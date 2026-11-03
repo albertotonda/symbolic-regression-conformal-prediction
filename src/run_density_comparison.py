@@ -4,6 +4,11 @@ existing run_sigma_sr.py run. For each dataset, the splits are rebuilt from
 the run's config and seed, the estimators are fit on the base regressor's
 training features, and the Spearman correlation between each rarity score
 and the sigma of the PySR "score" equation is computed on cal + test.
+
+Each score (rarity scores and SR sigma) is also compared with the actual
+difficulty, |residual| on cal + test, with the concordance index: the
+probability that, of two points, the one with the higher score has the larger
+residual (0.5 = random, ties in the score count 0.5).
 """
 
 import os
@@ -14,7 +19,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from box import Box
-from scipy.stats import spearmanr
+from scipy.stats import kendalltau, spearmanr
 
 from sklearn.ensemble import IsolationForest
 from sklearn.mixture import GaussianMixture
@@ -43,6 +48,22 @@ def score_equation_complexity(hof):
     score = np.where(loss[1:] > 0, score, np.inf)
     score = np.concatenate([[0.0], score])
     return int(hof.index[np.argmax(score)])
+
+
+def concordance_index(score, target):
+    """
+    Harrell's concordance index between a score and a target, over the pairs
+    with different targets; pairs tied on the score count 0.5. Computed from
+    Kendall's tau-b in O(n log n), as C = 0.5 + (P - Q) / (2 * pairs).
+    """
+    n_pairs = len(score) * (len(score) - 1) / 2
+    score_ties = (pd.Series(score).value_counts() ** 2 - pd.Series(score).value_counts()).sum() / 2
+    target_ties = (pd.Series(target).value_counts() ** 2 - pd.Series(target).value_counts()).sum() / 2
+    if score_ties == n_pairs:
+        return 0.5
+    tau_b = kendalltau(score, target).statistic
+    concordant_minus_discordant = tau_b * np.sqrt((n_pairs - score_ties) * (n_pairs - target_ties))
+    return 0.5 + concordant_minus_discordant / (2 * (n_pairs - target_ties))
 
 
 def fit_rarity_scorers(X_train, k, random_seed):
@@ -93,10 +114,12 @@ def compare_dataset(task_folder, task_id, config, loss_name, random_seed):
 
     scorers = fit_rarity_scorers(X_prop_train, config.ncp_knn_k, random_seed)
 
+    file_of = {"cal": "calibration_data.csv", "test": "testing_data.csv"}
     frames = []
     for split in ("cal", "test"):
         sigmas = pd.read_csv(os.path.join(task_folder, f"hof_sigmas_{split}_{loss_name}.csv"), index_col="index")
-        df = pd.DataFrame({"split": split, "sr_sigma": sigmas[str(complexity)].to_numpy()})
+        abs_residuals = pd.read_csv(os.path.join(task_folder, file_of[split]))["residuals"].abs().to_numpy()
+        df = pd.DataFrame({"split": split, "abs_residual": abs_residuals, "sr_sigma": sigmas[str(complexity)].to_numpy()})
         for method, scorer in scorers.items():
             df[method] = scorer(X_eval[split])
         frames.append(df)
@@ -104,7 +127,11 @@ def compare_dataset(task_folder, task_id, config, loss_name, random_seed):
 
     # NaN when the SR sigma is constant (complexity-1 equation)
     spearman = {method: spearmanr(df_scores[method], df_scores["sr_sigma"]).statistic for method in DENSITY_METHODS}
-    return df_scores, complexity, spearman
+    cindex = {
+        f"cindex_{method}": concordance_index(df_scores[method].to_numpy(), df_scores["abs_residual"].to_numpy())
+        for method in ("sr_sigma",) + DENSITY_METHODS
+    }
+    return df_scores, complexity, spearman, cindex
 
 
 def seed_from_folder(results_folder):
@@ -132,11 +159,11 @@ if __name__ == "__main__":
     for task_id, dataset_name in zip(df_results["task_id"], df_results["dataset_name"]):
         print(f"{dataset_name}...", flush=True)
         task_folder = os.path.join(args.results, dataset_name)
-        df_scores, complexity, spearman = compare_dataset(
+        df_scores, complexity, spearman, cindex = compare_dataset(
             task_folder, task_id, config, loss_name, random_seed
         )
         df_scores.to_csv(os.path.join(task_folder, "density_scores.csv"), index_label="index")
-        rows.append({"dataset_name": dataset_name, "sr_complexity": complexity, "n_points": len(df_scores), **spearman})
+        rows.append({"dataset_name": dataset_name, "sr_complexity": complexity, "n_points": len(df_scores), **spearman, **cindex})
 
         df_spearman = pd.DataFrame(rows)
         df_spearman.to_csv(os.path.join(args.results, "density_spearman.csv"), index=False)
@@ -144,3 +171,5 @@ if __name__ == "__main__":
     print(df_spearman.round(2).to_string(index=False))
     print("\nMedian Spearman:")
     print(df_spearman[list(DENSITY_METHODS)].median().round(2).to_string())
+    print("\nMedian concordance index with |residual|:")
+    print(df_spearman.filter(like="cindex_").median().round(2).to_string())
