@@ -1,0 +1,4 @@
+Symbolic Regression of Confidence Intervals for Conformal Prediction
+Copyright 2024-2026 INRAE (Institut national de recherche pour l'agriculture, l'alimentation et l'environnement)
+
+This product includes software developed at INRAE (https://www.inrae.fr/).
