@@ -1,0 +1,350 @@
+% references.bib — cleaned 2026-11-24, ordered by Related Work paragraph.
+% Per-paper notes: Obsidian, 03 - Professional/sigma-sr bibliography map.md
+
+% ======================================================================
+% 1. Uncertainty quantification
+% ======================================================================
+@book{Neal1996,
+  author    = {Neal, Radford M.},
+  title     = {Bayesian Learning for Neural Networks},
+  series    = {Lecture Notes in Statistics},
+  volume    = {118},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {1996},
+  doi       = {10.1007/978-1-4612-0745-0}
+}
+
+@book{Rasmussen2006,
+  author    = {Rasmussen, Carl Edward and Williams, Christopher K. I.},
+  title     = {Gaussian Processes for Machine Learning},
+  publisher = {MIT Press},
+  address   = {Cambridge, MA},
+  year      = {2006},
+  doi       = {10.7551/mitpress/3206.001.0001}
+}
+
+@article{Koenker1978,
+  author  = {Koenker, Roger and Bassett, Gilbert},
+  title   = {Regression Quantiles},
+  journal = {Econometrica},
+  volume  = {46},
+  number  = {1},
+  pages   = {33--50},
+  year    = {1978},
+  doi     = {10.2307/1913643}
+}
+
+@article{Meinshausen2006,
+  author  = {Meinshausen, Nicolai},
+  title   = {Quantile Regression Forests},
+  journal = {Journal of Machine Learning Research},
+  volume  = {7},
+  pages   = {983--999},
+  year    = {2006},
+  url       = {https://jmlr.org/papers/v7/meinshausen06a.html}
+}
+
+@book{Vovk2005,
+  author    = {Vovk, Vladimir and Gammerman, Alexander and Shafer, Glenn},
+  title     = {Algorithmic Learning in a Random World},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {2005},
+  doi       = {10.1007/b106715}
+}
+
+@article{Angelopoulos2023,
+  author  = {Angelopoulos, Anastasios N. and Bates, Stephen},
+  title   = {Conformal Prediction: A Gentle Introduction},
+  journal = {Foundations and Trends in Machine Learning},
+  volume  = {16},
+  number  = {4},
+  pages   = {494--591},
+  year    = {2023},
+  doi     = {10.1561/2200000101}
+}
+
+% ======================================================================
+% 2. Marginal vs conditional coverage
+% ======================================================================
+@inproceedings{Papadopoulos2002,
+  author    = {Papadopoulos, Harris and Proedrou, Kostas and Vovk, Volodya and Gammerman, Alex},
+  title     = {Inductive Confidence Machines for Regression},
+  booktitle = {Machine Learning: ECML 2002},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {2430},
+  pages     = {345--356},
+  publisher = {Springer},
+  year      = {2002},
+  doi       = {10.1007/3-540-36755-1_29}
+}
+
+@article{Lei2018,
+  author  = {Lei, Jing and G'Sell, Max and Rinaldo, Alessandro and Tibshirani, Ryan J. and Wasserman, Larry},
+  title   = {Distribution-Free Predictive Inference for Regression},
+  journal = {Journal of the American Statistical Association},
+  volume  = {113},
+  number  = {523},
+  pages   = {1094--1111},
+  year    = {2018},
+  doi     = {10.1080/01621459.2017.1307116}
+}
+
+@inproceedings{Vovk2012,
+  author    = {Vovk, Vladimir},
+  title     = {Conditional validity of inductive conformal predictors},
+  booktitle = {Proceedings of the Asian Conference on Machine Learning (ACML 2012)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {25},
+  pages     = {475--490},
+  year      = {2012},
+  url       = {https://proceedings.mlr.press/v25/vovk12.html}
+}
+
+@article{Lei2014,
+  author  = {Lei, Jing and Wasserman, Larry},
+  title   = {Distribution-free prediction bands for non-parametric regression},
+  journal = {Journal of the Royal Statistical Society: Series B (Statistical Methodology)},
+  volume  = {76},
+  number  = {1},
+  pages   = {71--96},
+  year    = {2014},
+  doi     = {10.1111/rssb.12021}
+}
+
+@article{FoygelBarber2021,
+  author  = {Foygel Barber, Rina and Cand{\`e}s, Emmanuel J. and Ramdas, Aaditya and Tibshirani, Ryan J.},
+  title   = {The limits of distribution-free conditional predictive inference},
+  journal = {Information and Inference: A Journal of the IMA},
+  volume  = {10},
+  number  = {2},
+  pages   = {455--482},
+  year    = {2021},
+  doi     = {10.1093/imaiai/iaaa017}
+}
+
+@inproceedings{Feldman2021,
+  author    = {Feldman, Shai and Bates, Stephen and Romano, Yaniv},
+  title     = {Improving Conditional Coverage via Orthogonal Quantile Regression},
+  booktitle = {Advances in Neural Information Processing Systems 34 (NeurIPS 2021)},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2106.00394}
+}
+
+% ======================================================================
+% 3. Adaptive conformal prediction
+% ======================================================================
+@inproceedings{Romano2019,
+  author    = {Romano, Yaniv and Patterson, Evan and Cand{\`e}s, Emmanuel},
+  title     = {Conformalized Quantile Regression},
+  booktitle = {Advances in Neural Information Processing Systems 32 (NeurIPS 2019)},
+  year      = {2019},
+  url       = {https://arxiv.org/abs/1905.03222}
+}
+
+@inproceedings{Bostrom2020,
+  author    = {Bostr{\"o}m, Henrik and Johansson, Ulf},
+  title     = {Mondrian conformal regressors},
+  booktitle = {Proceedings of the Ninth Symposium on Conformal and Probabilistic Prediction and Applications (COPA 2020)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {128},
+  pages     = {114--133},
+  year      = {2020},
+  url       = {https://proceedings.mlr.press/v128/bostrom20a.html}
+}
+
+@article{Cabezas2025,
+  author  = {Cabezas, Luben M. C. and Otto, Mateus P. and Izbicki, Rafael and Stern, Rafael B.},
+  title   = {Regression trees for fast and adaptive prediction intervals},
+  journal = {Information Sciences},
+  volume  = {686},
+  pages   = {121369},
+  year    = {2025},
+  doi     = {10.1016/j.ins.2024.121369}
+}
+
+@inproceedings{Papadopoulos2008,
+  author    = {Papadopoulos, Harris and Gammerman, Alex and Vovk, Volodya},
+  title     = {Normalized Nonconformity Measures for Regression Conformal Prediction},
+  booktitle = {Proceedings of the IASTED International Conference on Artificial Intelligence and Applications (AIA 2008)},
+  pages     = {64--69},
+  year      = {2008},
+  url       = {https://pure.royalholloway.ac.uk/en/publications/normalized-nonconformity-measures-for-regression-conformal-predic/}
+}
+
+@article{Papadopoulos2011,
+  author  = {Papadopoulos, Harris and Vovk, Vladimir and Gammerman, Alex},
+  title   = {Regression Conformal Prediction with Nearest Neighbours},
+  journal = {Journal of Artificial Intelligence Research},
+  volume  = {40},
+  pages   = {815--840},
+  year    = {2011},
+  doi     = {10.1613/jair.3198}
+}
+
+@article{Bostrom2017,
+  author  = {Bostr{\"o}m, Henrik and Linusson, Henrik and L{\"o}fstr{\"o}m, Tuve and Johansson, Ulf},
+  title   = {Accelerating difficulty estimation for conformal regression forests},
+  journal = {Annals of Mathematics and Artificial Intelligence},
+  volume  = {81},
+  number  = {1-2},
+  pages   = {125--144},
+  year    = {2017},
+  doi     = {10.1007/s10472-017-9539-9}
+}
+
+@inproceedings{Bostrom2022,
+  author    = {Bostr{\"o}m, Henrik},
+  title     = {crepes: a Python Package for Generating Conformal Regressors and Predictive Systems},
+  booktitle = {Proceedings of the Eleventh Symposium on Conformal and Probabilistic Prediction with Applications (COPA 2022)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {179},
+  pages     = {24--41},
+  year      = {2022},
+  url       = {https://proceedings.mlr.press/v179/bostrom22a.html}
+}
+
+% ======================================================================
+% 4. Symbolic regression
+% ======================================================================
+@book{Koza1992,
+  author    = {Koza, John R.},
+  title     = {Genetic Programming: On the Programming of Computers by Means of Natural Selection},
+  publisher = {MIT Press},
+  address   = {Cambridge, MA},
+  year      = {1992},
+  isbn      = {0-262-11170-5},
+  url       = {https://mitpress.mit.edu/9780262527910/genetic-programming/}
+}
+
+@misc{Cranmer2023,
+  author        = {Cranmer, Miles},
+  title         = {Interpretable Machine Learning for Science with {PySR} and {SymbolicRegression.jl}},
+  year          = {2023},
+  eprint        = {2305.01582},
+  archivePrefix = {arXiv},
+  primaryClass  = {astro-ph.IM},
+  doi           = {10.48550/arXiv.2305.01582}
+}
+
+@inproceedings{LaCava2021,
+  author    = {La Cava, William and Orzechowski, Patryk and Burlacu, Bogdan and de Fran{\c{c}}a, Fabr{\'i}cio Olivetti and Virgolin, Marco and Jin, Ying and Kommenda, Michael and Moore, Jason H.},
+  title     = {Contemporary Symbolic Regression Methods and their Relative Performance},
+  booktitle = {Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks},
+  year      = {2021},
+  eprint    = {2107.14351},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{TondaLutton2026,
+  author    = {Tonda, Alberto and Lutton, Evelyne},
+  title     = {Symbolic Regression Can Perform on Par with Tree-based Ensembles in Regression Problems},
+  booktitle = {Proceedings of the 17th International Conference on Artificial Evolution (EA 2026)},
+  year      = {2026},
+  editor    = {Pallez, Denis},
+  volume    = {17},
+  pages     = {155--170},
+  month     = {October}
+}
+
+@article{Rudin2019,
+  author  = {Rudin, Cynthia},
+  title   = {Stop explaining black box machine learning models for high stakes decisions and use interpretable models instead},
+  journal = {Nature Machine Intelligence},
+  volume  = {1},
+  number  = {5},
+  pages   = {206--215},
+  year    = {2019},
+  doi     = {10.1038/s42256-019-0048-x}
+}
+
+% ======================================================================
+% 5. Symbolic regression and uncertainty
+% ======================================================================
+@inproceedings{Thuong2017,
+  author    = {Thuong, Pham Thi and Hoai, Nguyen Xuan and Yao, Xin},
+  title     = {Combining Conformal Prediction and Genetic Programming for Symbolic Interval Regression},
+  booktitle = {Proceedings of the Genetic and Evolutionary Computation Conference (GECCO '17)},
+  pages     = {1001--1008},
+  publisher = {ACM},
+  year      = {2017},
+  doi       = {10.1145/3071178.3071280}
+}
+
+@misc{Reuter2026,
+  author        = {Reuter, Julia and Olivetti de Fran{\c{c}}a, Fabricio},
+  title         = {Are you sure? A Comprehensive and Comprehensible Survey of Uncertainty Quantification in Symbolic Regression},
+  year          = {2026},
+  eprint        = {2606.06567},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG}
+}
+
+@inproceedings{Tonda2026,
+  author    = {Tonda, Alberto and Lopez-Rincon, Alejandro and Rojas-Velazquez, David and Lutton, Evelyne},
+  title     = {Symbolic Regression of Confidence Intervals for Conformal Prediction},
+  booktitle = {Artificial Evolution: 16th International Conference, {\'E}volution Artificielle, EA 2024, Bordeaux, France, October 29--31, 2024, Revised Selected Papers},
+  editor    = {Legrand, Pierrick and Liefooghe, Arnaud and Lepagnot, Julien and Monmarch{\'e}, Nicolas and Idoumghar, Lhassane and Pallez, Denis and Siarry, Patrick and Lutton, Evelyne},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {15926},
+  pages     = {195--208},
+  publisher = {Springer},
+  address   = {Cham},
+  year      = {2026},
+  doi       = {10.1007/978-3-032-07998-5_14}
+}
+
+@article{Hoekstra2026,
+  author  = {Oude Hoekstra, Cas and den Hengst, Floris},
+  title   = {Symbolic Quantile Regression for the Interpretable Prediction of Conditional Quantiles},
+  journal = {Transactions on Machine Learning Research},
+  year    = {2026},
+  note    = {arXiv:2508.08080},
+  url       = {https://arxiv.org/abs/2508.08080}
+}
+
+% ======================================================================
+% 6. Method: out-of-bag residuals
+% ======================================================================
+@article{Johansson2014,
+  author  = {Johansson, Ulf and Bostr{\"o}m, Henrik and L{\"o}fstr{\"o}m, Tuve and Linusson, Henrik},
+  title   = {Regression conformal prediction with random forests},
+  journal = {Machine Learning},
+  volume  = {97},
+  number  = {1-2},
+  pages   = {155--176},
+  year    = {2014},
+  doi     = {10.1007/s10994-014-5453-0}
+}
+
+@inproceedings{Kim2020,
+  author    = {Kim, Byol and Xu, Chen and Foygel Barber, Rina},
+  title     = {Predictive inference is free with the jackknife+-after-bootstrap},
+  booktitle = {Advances in Neural Information Processing Systems 33 (NeurIPS 2020)},
+  year      = {2020},
+  url       = {https://arxiv.org/abs/2002.09025}
+}
+
+% ======================================================================
+% Protocol: benchmark and metrics
+% ======================================================================
+@inproceedings{Fischer2023,
+  author    = {Fischer, Sebastian Felix and Harutyunyan, Liana and Feurer, Matthias and Bischl, Bernd},
+  title     = {{OpenML-CTR23} -- A curated tabular regression benchmarking suite},
+  booktitle = {AutoML Conference 2023 (Workshop Track)},
+  address   = {Berlin, Germany},
+  year      = {2023},
+  url       = {https://openreview.net/forum?id=HebAOoMm94}
+}
+
+@article{Winkler1972,
+  author  = {Winkler, Robert L.},
+  title   = {A Decision-Theoretic Approach to Interval Estimation},
+  journal = {Journal of the American Statistical Association},
+  year    = {1972},
+  volume  = {67},
+  number  = {337},
+  pages   = {187--191},
+  doi     = {10.1080/01621459.1972.10481224}
+}
