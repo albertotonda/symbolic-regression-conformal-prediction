@@ -25,3 +25,6 @@ src/*OpenML-CTR23-statistics.csv
 /dashboard/tests
 AGENTS.md
 requirements.in
+
+# Editor
+.vscode/
