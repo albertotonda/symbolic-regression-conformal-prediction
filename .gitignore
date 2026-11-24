@@ -27,3 +27,6 @@ AGENTS.md
 requirements.in
 /src/20240514-results
 /src/20240603-results
+
+# Editor
+.vscode/
