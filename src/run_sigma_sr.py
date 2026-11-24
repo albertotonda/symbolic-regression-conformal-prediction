@@ -179,6 +179,11 @@ def run_single_task(dataset, task_folder, config, random_seed):
     X_cal_sr = np.concatenate((X_cal, X_cal_sr), axis=1)
     X_test_sr = np.concatenate((X_test, X_test_sr), axis=1)
 
+    # SR inputs (named x0..x{p-1} like in PySR equations) and residuals, for post-hoc feature selection
+    df_sr_train = pd.DataFrame(X_train_sr, columns=[f"x{j}" for j in range(X_train_sr.shape[1])])
+    df_sr_train["residual"] = residuals_sr
+    df_sr_train.to_csv(os.path.join(task_folder, "sr_training_data.csv"), index=False)
+
     y_log_abs_residual_sr = np.log(np.abs(residuals_sr) + 1e-8)
 
     sigma_losses = {

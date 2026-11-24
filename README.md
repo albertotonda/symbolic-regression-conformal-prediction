@@ -6,4 +6,5 @@ Usage: install the Python packages found inside `requirements.txt`, then `uv run
 
 `src/analysis/` contains post-hoc analysis scripts, also run from inside `src/`:
 - `python -m analysis.check_pareto_optimality <results_folder>` checks Pareto optimality between methods for a given results folder produced by `run_experiments.py`.
+- `uv run src/analysis/compare_feature_selection.py <results_folder>` compares the features used by the SR equation chosen by PySR's "score" selection with feature selection on the absolute SR-training residuals (Spearman, mutual information, RF permutation importance, RFECV, forward stepwise). Older runs without `sr_training_data.csv` are rebuilt by downloading each task and retraining the base regressor. See `--help` for options.
 - `python -m analysis.statistics_openml_ctr23` computes descriptive statistics (missing data, categorical features, baseline R2/MSE) for the OpenML-CTR23 suite.

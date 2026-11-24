@@ -30,7 +30,7 @@ data_augmentation:
     sigma_knn_res: False
     sigma_var: False
 
-loss_functions: [bin_crossfit]
+loss_functions: [pinball]
 lambda_cov : 500
 ncp_knn_k: 25
 
