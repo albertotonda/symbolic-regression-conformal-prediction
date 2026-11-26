@@ -20,6 +20,15 @@
 
 ## Chronological notes
 
+### 2026-11-26 — Scope of the paper experiments (decisions)
+
+The paper defends one claim: σ-SR makes the difficulty readable for a moderate performance cost. Experiments are kept only if they serve that claim.
+
+- **Model class of σ (core, Q2).** Same target (log|r|), loss (pinball 0.95), OOB residuals and calibration; only the model changes. `xgb_quantile` already gives the cost of the formula (median Winkler −8.6% vs SR on 26 datasets). A RF/QRF quantile variant is optional (checks the cost does not depend on XGBoost). Lower reference still to do: linear σ, shallow tree or LOCART.
+- **Loss (MAD vs pinball): secondary.** Justified by principle in the Method: the (1−α) quantile matches what the interval needs, and quantiles commute with log, so exp(g) estimates the 95% quantile of |r| exactly. Not tested on SR (would need SR reruns). Optional appendix check on black boxes: `xgb_abs` (squared loss on |r|) vs `xgb_quantile`.
+- **Lei2018 is not a baseline.** It is the historical reference for a learned σ (Related Work only). `rf_abs` mixes two changes (model and target vs `xgb_quantile`), so it answers no clean question: drop from the main results, appendix at most.
+- **Main comparisons kept:** heuristic NCP / Mondrian / SCP (done, rescore 20 seeds with the "score" equation), CQR (to do), black box same target/loss (done), simple interpretable σ (to do).
+
 ### 2026-11-03 — Black-box sigma baselines (Q2) and SHAP (`results-sigma-sr-42-base`)
 
 `src/run_blackbox_sigma.py` learns two black-box sigmas on the run's OOB residuals and calibrates them with NCP on the same cal set: `xgb_quantile` (XGBoost, pinball at 0.95 on log|r|, the SR's own target and loss, tuned by 5-fold CV) and `rf_abs` (RF on |r|, classic learned sigma). All methods are rescored on test, the SR one with its "score" equation (the run's "Chosen" equation is never the score one in this folder). Results in `blackbox_metrics.csv` and `blackbox_shap.csv`. 26 datasets with 0.3 ≤ R² ≤ 0.99:
